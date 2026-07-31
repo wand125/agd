@@ -118,7 +118,8 @@ function toggleMask() {
 // エスケープ済みテキスト内の URL をリンク化(新しいタブで開く)。末尾の句読点や括弧は除外
 function linkify(escaped) {
   return escaped.replace(/(https?:\/\/[^\s<>"']+)/g, (m) => {
-    const url = m.replace(/[)\]}.,;:。、」』>]+$/, "");
+    // 末尾の句読点・括弧・Markdown記号(** など)はURLに含めない
+    const url = m.replace(/[)\]}.,;:。、」』>*_`]+$/, "");
     return `<a href="${url}" target="_blank" rel="noopener">${url}</a>${m.slice(url.length)}`;
   });
 }
