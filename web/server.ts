@@ -994,6 +994,10 @@ try {
       return new Response(Bun.file(INDEX_HTML), { headers: noCache });
     if (url.pathname === "/app.js")
       return new Response(Bun.file(join(import.meta.dir, "public", "app.js")), { headers: noCache });
+    if (url.pathname === "/favicon.ico")
+      return new Response(Bun.file(join(import.meta.dir, "public", "favicon.ico")));
+    if (url.pathname === "/favicon-256.png")
+      return new Response(Bun.file(join(import.meta.dir, "public", "favicon-256.png")));
     if (url.pathname === "/api/sessions")
       return Response.json(lastSnapshot);
     if (url.pathname === "/api/projects") {
