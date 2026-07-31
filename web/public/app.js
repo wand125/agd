@@ -21,15 +21,18 @@ function ensureCardOrder(list) { // 新規セッションを末尾に追加
   for (const s of list) if (!cardOrder.includes(s.key)) { cardOrder.push(s.key); changed = true; }
   if (changed) saveCardOrder();
 }
-// ピン留め(cwd 基準・ピン順で先頭寄せ・永続化)
+// ピン留め(セッション単位・ピン順で先頭寄せ・永続化)
 let pinned = [];
-try { pinned = JSON.parse(localStorage.getItem("agd-pinned") || "[]"); } catch {}
-function togglePin(cwd) {
-  if (!cwd) return;
-  const i = pinned.indexOf(cwd);
-  if (i >= 0) { pinned.splice(i, 1); toast(`📌 解除: ${projName(cwd)}`); }
-  else { pinned.push(cwd); toast(`📌 ピン留め: ${projName(cwd)}`); }
-  localStorage.setItem("agd-pinned", JSON.stringify(pinned));
+try { pinned = JSON.parse(localStorage.getItem("agd-pinned-keys") || "[]"); } catch {}
+function savePinned() { localStorage.setItem("agd-pinned-keys", JSON.stringify(pinned)); }
+function togglePin(key) {
+  if (!key) return;
+  const s = sessionOf(key);
+  const label = s ? maskText(s.name) : key;
+  const i = pinned.indexOf(key);
+  if (i >= 0) { pinned.splice(i, 1); toast(`📌 解除: ${label}`); }
+  else { pinned.push(key); toast(`📌 ピン留め: ${label}`); }
+  savePinned();
   followSelection();
   render();
 }
@@ -41,23 +44,18 @@ function moveCard(key, dir) {
   if (idx < 0) { toast("カードが選択されていません"); return; }
   const cur = list[idx], nb = list[idx + dir];
   if (!nb) { toast(dir < 0 ? "すでに先頭です" : "すでに末尾です"); return; }
-  const swapSeq = () => {
-    const a = cardOrder.indexOf(cur.key), b = cardOrder.indexOf(nb.key);
-    if (a >= 0 && b >= 0) { [cardOrder[a], cardOrder[b]] = [cardOrder[b], cardOrder[a]]; saveCardOrder(); }
-  };
-  const curPinned = pinned.includes(cur.cwd), nbPinned = pinned.includes(nb.cwd);
-  if (cur.cwd === nb.cwd) {
-    swapSeq();
-    toast(`↔ カードを${dir < 0 ? "前" : "後ろ"}へ`);
-  } else if (curPinned && nbPinned) {
-    const i = pinned.indexOf(cur.cwd), j = pinned.indexOf(nb.cwd);
+  const curPinned = pinned.includes(cur.key), nbPinned = pinned.includes(nb.key);
+  if (curPinned && nbPinned) {
+    // ピン同士 → ピン順を入れ替え
+    const i = pinned.indexOf(cur.key), j = pinned.indexOf(nb.key);
     [pinned[i], pinned[j]] = [pinned[j], pinned[i]];
-    localStorage.setItem("agd-pinned", JSON.stringify(pinned));
-    toast(`📌 ${projName(cur.cwd)} を${dir < 0 ? "前" : "後ろ"}へ`);
+    savePinned();
+    toast(`📌 ${dir < 0 ? "前" : "後ろ"}へ`);
   } else if (curPinned !== nbPinned) {
     toast("📌 ピン領域の境界です(p でピン状態を揃えると跨げます)");
   } else {
-    swapSeq();
+    const a = cardOrder.indexOf(cur.key), b = cardOrder.indexOf(nb.key);
+    if (a >= 0 && b >= 0) { [cardOrder[a], cardOrder[b]] = [cardOrder[b], cardOrder[a]]; saveCardOrder(); }
     toast(`↔ カードを${dir < 0 ? "前" : "後ろ"}へ`);
   }
   followSelection();
@@ -333,7 +331,7 @@ function orderedFiltered() {
     const rank = new Map(cardOrder.map((k, i) => [k, i]));
     filtered = [...filtered].sort((a, b) => (rank.get(a.key) ?? 1e9) - (rank.get(b.key) ?? 1e9));
   }
-  const pinRank = (s) => { const i = pinned.indexOf(s.cwd); return i < 0 ? 1e9 : i; };
+  const pinRank = (s) => { const i = pinned.indexOf(s.key); return i < 0 ? 1e9 : i; };
   return [...filtered].sort((a, b) => pinRank(a) - pinRank(b));
 }
 
@@ -376,7 +374,7 @@ function renderGrid() {
     el.querySelector(".card-title").textContent = maskText(s.name);
     el.querySelector(".card-meta").textContent = fmtAge(s.ageS);
     el.querySelector(".git-badge").innerHTML = gitBadge(s.git);
-    el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.cwd));
+    el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.key));
     renderPromptBar(el.querySelector(".prompt-bar"), s);
     const scr = el.querySelector(".screen");
     if (setScreen(scr, s.screen ?? "(画面を取得できません)")) {
@@ -399,7 +397,7 @@ function buildCard(key) {
       <span class="git-badge"></span><span class="card-meta"></span>
       <button class="jump-btn pin-move pin-left" title="ピン順を前へ (⇧H)">◀</button>
       <button class="jump-btn pin-move pin-right" title="ピン順を後ろへ (⇧L)">▶</button>
-      <button class="jump-btn pin-btn" title="ピン留め(プロジェクト単位で先頭に固定)">📌</button>
+      <button class="jump-btn pin-btn" title="ピン留め(このセッションを先頭に固定)">📌</button>
       <button class="jump-btn detail-btn" title="詳細ログを開く">⤢</button>
       <button class="jump-btn go-btn" title="ターミナルへジャンプ">⌖</button>
     </div>
@@ -409,7 +407,7 @@ function buildCard(key) {
       <button class="latest-btn">↓ 最新</button>
     </div>
     <div class="send-row"><textarea rows="1" placeholder="⏎送信 / ⇧⏎改行"></textarea></div>`;
-  el.querySelector(".pin-btn").onclick = (e) => { e.stopPropagation(); togglePin(sessionOf(el.dataset.key)?.cwd); };
+  el.querySelector(".pin-btn").onclick = (e) => { e.stopPropagation(); togglePin(el.dataset.key); };
   el.querySelector(".pin-left").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, -1); };
   el.querySelector(".pin-right").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, 1); };
   el.querySelector(".detail-btn").onclick = (e) => { e.stopPropagation(); openDetail(el.dataset.key); };
@@ -876,7 +874,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "s" && s?.running) sendNamedKey("Escape", "Esc(中断)");
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && s) { e.preventDefault(); resumeContinue(listKey); }
     else if (/^[1-9]$/.test(e.key) && s?.running) answerPromptByNumber(listKey, Number(e.key));
-    else if (e.key === "p" && s) togglePin(s.cwd);
+    else if (e.key === "p" && s) togglePin(listKey);
     else if (e.key === "n") { e.preventDefault(); openNew(); }
     else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
     return;
@@ -948,7 +946,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "n") { e.preventDefault(); openNew(); }
   else if (e.key === "m" && kbdKey) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
   else if (e.key === "s" && kbdKey) sendNamedKey("Escape", "Esc(中断)");
-  else if (e.key === "p" && kbdKey) togglePin(sessionOf(kbdKey)?.cwd);
+  else if (e.key === "p" && kbdKey) togglePin(kbdKey);
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
   else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
 });
