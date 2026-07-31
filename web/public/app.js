@@ -923,8 +923,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "l" || e.key === "ArrowRight") move(1, 0);
   else if (e.key === "j" || e.key === "ArrowDown") move(0, 1);
   else if (e.key === "k" || e.key === "ArrowUp") move(0, -1);
-  else if (e.ctrlKey && e.key === "f") { e.preventDefault(); $("page-next").click(); }
-  else if (e.ctrlKey && e.key === "b") { e.preventDefault(); $("page-prev").click(); }
+  else if (e.key === "]" || (e.ctrlKey && e.key === "f")) { e.preventDefault(); $("page-next").click(); }
+  else if (e.key === "[" || (e.ctrlKey && e.key === "b")) { e.preventDefault(); $("page-prev").click(); }
   else if (e.key === "g") { page = 0; render(); const c = visibleCards(); kbdKey = c[0]?.dataset.key ?? kbdKey; updateKbdSelection(); }
   else if (e.key === "G") {
     const list = orderedFiltered();
