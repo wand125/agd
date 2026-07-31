@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# agd — AI agent session dashboard (Claude Code + Codex CLI)
+# 実行中セッション(iTerm2素タブ含む)と最近のresume可能セッションを統合一覧し、
+# 選択で「該当ターミナルへジャンプ」or「新しいタブ/tmuxウィンドウでresume」する。
+#
+# 使い方:
+#   agd            fzf ピッカー(Enter=ジャンプ/resume)
+#   agd list       テーブル表示のみ
+#   agd watch      2秒間隔で一覧を更新表示
+#   agd web        ブラウザダッシュボードを起動 (http://localhost:8787)
+set -uo pipefail
+
+CODEX_SESSIONS="$HOME/.codex/sessions"
+CODEX_INDEX="$HOME/.codex/session_index.jsonl"
+CLAUDE_PROJECTS="$HOME/.claude/projects"
+CACHE_DIR="$HOME/.cache/agd"
+ROLLOUT_CACHE="$CACHE_DIR/rollouts.tsv"   # path \t session_id \t cwd
+RECENT_LIMIT=8
+BUSY_WINDOW=20   # rollout更新がこの秒数以内なら busy とみなす
+
+now() { date +%s; }
+
+fmt_age() { # 秒数 → "3m" / "2h" / "5d"
+  local s=$1
+  (( s < 0 )) && s=0
+  if   (( s < 60 ));    then echo "${s}s"
+  elif (( s < 3600 ));  then echo "$(( s / 60 ))m"
+  elif (( s < 86400 )); then echo "$(( s / 3600 ))h"
+  else                       echo "$(( s / 86400 ))d"
+  fi
+}
+
+state_icon() {
+  case "$1" in
+    busy)                  echo "●" ;;
+    *wait*|*input*|*need*) echo "▲" ;;
+    idle)                  echo "○" ;;
+    *)                     echo "·" ;;
+  esac
+}
+
+# AGD_PATH_STRIP で指定した共通プレフィックスを「…」に短縮(未設定なら $HOME→~ のみ)
+short_cwd() {
+  local p=$1
+  if [[ -n "${AGD_PATH_STRIP:-}" && "$p" == "${AGD_PATH_STRIP}"* ]]; then
+    p="…${p#"$AGD_PATH_STRIP"}"
+  fi
+  echo "${p/#$HOME/~}"
+}
+
+# ---- rollout メタ情報の増分キャッシュ(path/id/cwd) ---------------------------
+update_rollout_cache() {
+  mkdir -p "$CACHE_DIR"
+  local new_files
+  if [[ -f "$ROLLOUT_CACHE" ]]; then
+    new_files=$(find "$CODEX_SESSIONS" -name "*.jsonl" -newer "$ROLLOUT_CACHE" 2>/dev/null)
+  else
+    new_files=$(find "$CODEX_SESSIONS" -name "*.jsonl" 2>/dev/null)
+  fi
+  if [[ -z "$new_files" ]]; then touch "$ROLLOUT_CACHE"; return 0; fi
+  {
+    # 各ファイルの先頭行(session_meta)を単一awk+単一jqで一括パース
+    tr '\n' '\0' <<< "$new_files" |
+      xargs -0 awk 'FNR==1 {print FILENAME "\t" $0; nextfile}' 2>/dev/null |
+      jq -Rr 'capture("^(?<f>[^\t]+)\t(?<j>.*)$") |
+              ((.j | fromjson?) // {}) as $m |
+              [.f, ($m.payload.id // ""), ($m.payload.cwd // "")] | @tsv' 2>/dev/null
+    [[ -f "$ROLLOUT_CACHE" ]] && cat "$ROLLOUT_CACHE"
+  } | awk -F'\t' '!seen[$1]++' > "$ROLLOUT_CACHE.tmp"
+  mv "$ROLLOUT_CACHE.tmp" "$ROLLOUT_CACHE"
+}
+
+rollout_by_cwd() { # cwd → "path \t id"(mtime最新の1件)
+  awk -F'\t' -v c="$1" '$3 == c {print $1 "\t" $2}' "$ROLLOUT_CACHE" |
+  while IFS=$'\t' read -r p sid; do
+    [[ -f "$p" ]] && printf '%s\t%s\t%s\n' "$(stat -f '%m' "$p")" "$p" "$sid"
+  done | sort -rn | head -1 | cut -f2-
+}
+
+rollout_by_id() { # session_id → "path \t cwd"
+  awk -F'\t' -v s="$1" '$2 == s {print $1 "\t" $3; exit}' "$ROLLOUT_CACHE"
+}
+
+# ---- 実行中: Claude Code (公式 agent view API) --------------------------------
+list_claude_running() {
+  claude agents --json 2>/dev/null | jq -r '.[] |
+    [ .pid, (.status // "idle"), (.name // ""), .cwd, .sessionId,
+      ((now * 1000 - .startedAt) / 1000 | floor) ] | @tsv' |
+  while IFS=$'\t' read -r pid status name cwd sid age_s; do
+    local tty; tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ "$tty" == "??" ]] && tty=""
+    printf 'jump:%s:claude:%s:%s\t%s claude\t%-7s\t%s\t%s\t%s\n' \
+      "$tty" "$sid" "$cwd" "$(state_icon "$status")" "$status" \
+      "${name:-$sid}" "$(short_cwd "$cwd")" "$(fmt_age "$age_s")"
+  done
+}
+
+# ---- 実行中: Codex (プロセス + rollout キャッシュ突合) -------------------------
+list_codex_running() {
+  local t; t=$(now)
+  local -a pids=()
+  while read -r pid _; do pids+=("$pid"); done < <(
+    ps -axo pid=,command= | awk '$2 == "codex"')
+  (( ${#pids[@]} == 0 )) && return 0
+  # cwd は lsof 一括呼び出しで取得
+  local lsof_out; lsof_out=$(lsof -a -p "$(IFS=,; echo "${pids[*]}")" -d cwd -Fpn 2>/dev/null)
+  local pid="" cwd
+  while IFS= read -r line; do
+    case "$line" in
+      p*) pid="${line#p}" ;;
+      n*) cwd="${line#n}"
+          local tty sid="" status="idle" name="" mt age_s=0 rf
+          tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+          [[ "$tty" == "??" ]] && tty=""
+          local hit; hit=$(rollout_by_cwd "$cwd")
+          if [[ -n "$hit" ]]; then
+            rf="${hit%%$'\t'*}"; sid="${hit#*$'\t'}"
+            mt=$(stat -f '%m' "$rf")
+            (( t - mt < BUSY_WINDOW )) && status="busy"
+            age_s=$(( t - mt ))
+            [[ -f "$CODEX_INDEX" && -n "$sid" ]] && \
+              name=$(grep "\"$sid\"" "$CODEX_INDEX" | tail -1 |
+                     jq -r '.thread_name // empty' 2>/dev/null)
+          fi
+          printf 'jump:%s:codex:%s:%s\t%s codex \t%-7s\t%s\t%s\t%s\n' \
+            "$tty" "${sid:-?}" "$cwd" "$(state_icon "$status")" "$status" \
+            "${name:-${sid:-pid $pid}}" "$(short_cwd "$cwd")" "$(fmt_age "$age_s")"
+          ;;
+    esac
+  done <<< "$lsof_out"
+}
+
+# ---- 最近の resume 可能セッション(実行中を除く) ------------------------------
+list_claude_recent() {
+  local running_ids=$1 t; t=$(now)
+  for dir in "$CLAUDE_PROJECTS"/*/; do
+    local f; f=$(ls -t "$dir"*.jsonl 2>/dev/null | head -1)
+    [[ -z "$f" ]] && continue
+    local sid; sid=$(basename "$f" .jsonl)
+    [[ "$running_ids" == *"$sid"* ]] && continue
+    echo "$(stat -f '%m' "$f")|$sid|$f"
+  done | sort -rn -t'|' | head -"$RECENT_LIMIT" |
+  while IFS='|' read -r mt sid f; do
+    local cwd summary
+    cwd=$(head -20 "$f" | grep -m1 -o '"cwd":"[^"]*"' | cut -d'"' -f4)
+    [[ -z "$cwd" ]] && continue
+    summary=$(grep -m1 '"type":"summary"' "$f" 2>/dev/null |
+              jq -r '.summary // empty' 2>/dev/null | cut -c1-40)
+    # summary が無ければ最後のプロンプト文で代用
+    [[ -z "$summary" && -f "$HOME/.claude/history.jsonl" ]] && \
+      summary=$(grep "\"sessionId\":\"$sid\"" "$HOME/.claude/history.jsonl" | tail -1 |
+                jq -r '.display // empty' 2>/dev/null | tr '\n' ' ' | cut -c1-40)
+    printf 'resume:claude:%s:%s\t- claude\t%-7s\t%s\t%s\t%s\n' \
+      "$sid" "$cwd" "resume" "${summary:-$sid}" "$(short_cwd "$cwd")" \
+      "$(fmt_age $(( t - mt )))"
+  done
+}
+
+list_codex_recent() {
+  local running_ids=$1 t; t=$(now)
+  [[ -f "$CODEX_INDEX" ]] || return 0
+  tail -60 "$CODEX_INDEX" | jq -rs '
+    group_by(.id) | map(max_by(.updated_at)) | sort_by(.updated_at) | reverse | .[] |
+    [ .id, (.thread_name // "") ] | @tsv' 2>/dev/null |
+  while IFS=$'\t' read -r sid name; do
+    [[ "$running_ids" == *"$sid"* ]] && continue
+    local hit rf cwd mt
+    hit=$(rollout_by_id "$sid")
+    [[ -z "$hit" ]] && continue
+    rf="${hit%%$'\t'*}"; cwd="${hit#*$'\t'}"
+    [[ -z "$cwd" || ! -f "$rf" ]] && continue
+    mt=$(stat -f '%m' "$rf")
+    printf 'resume:codex:%s:%s\t- codex \t%-7s\t%s\t%s\t%s\n' \
+      "$sid" "$cwd" "resume" "${name:-$sid}" "$(short_cwd "$cwd")" \
+      "$(fmt_age $(( t - mt )))"
+  done | head -"$RECENT_LIMIT"
+}
+
+build_list() {
+  update_rollout_cache
+  # 4ソースを並列収集し、resume候補から実行中セッションをマージ時に除外する
+  local d; d=$(mktemp -d)
+  list_claude_running   > "$d/cr" &
+  list_codex_running    > "$d/xr" &
+  list_claude_recent "" > "$d/cc" &
+  list_codex_recent  "" > "$d/xc" &
+  wait
+  local running; running=$(cat "$d/cr" "$d/xr")
+  [[ -n "$running" ]] && echo "$running" | sort -t$'\t' -k3,3
+  # キー形式: jump:tty:agent:sid:cwd / resume:agent:sid:cwd
+  echo "$running" | cut -f1 | awk -F: '{print $4}' > "$d/ids"
+  cat "$d/cc" "$d/xc" | awk -F'\t' -v idfile="$d/ids" '
+    BEGIN { while ((getline line < idfile) > 0) if (line != "") r[line] = 1 }
+    { split($1, k, ":"); if (!(k[3] in r)) print }'
+  rm -rf "$d"
+}
+
+# ---- アクション ---------------------------------------------------------------
+focus_tty() { # ttysNNN → tmuxペイン or iTerm2タブへフォーカス
+  local tty=$1
+  if [[ -n "${TMUX:-}" ]]; then
+    local pane
+    pane=$(tmux list-panes -a -F '#{pane_tty} #{session_name}:#{window_index}.#{pane_index}' 2>/dev/null |
+           awk -v t="/dev/$tty" '$1==t {print $2; exit}')
+    if [[ -n "$pane" ]]; then
+      tmux switch-client -t "${pane%%:*}" && tmux select-window -t "${pane%.*}" && return 0
+    fi
+  fi
+  osascript - "/dev/$tty" <<'APPLESCRIPT'
+on run argv
+  set target to item 1 of argv
+  tell application "iTerm2"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in sessions of t
+          if tty of s is target then
+            tell t to select
+            tell s to select
+            set index of w to 1
+            activate
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return "not found"
+end run
+APPLESCRIPT
+}
+
+open_resume() { # agent, session_id, cwd → 新しいタブ/tmuxウィンドウで resume
+  local agent=$1 sid=$2 cwd=$3 cmd
+  case "$agent" in
+    claude) cmd="cd ${cwd@Q} && claude --resume $sid" ;;
+    codex)  cmd="cd ${cwd@Q} && codex resume $sid" ;;
+  esac
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux new-window -c "$cwd" "$cmd"
+  else
+    osascript - "$cmd" <<'APPLESCRIPT'
+on run argv
+  set cmd to item 1 of argv
+  tell application "iTerm2"
+    if (count of windows) is 0 then
+      create window with default profile
+    else
+      tell current window to create tab with default profile
+    end if
+    tell current session of current window to write text cmd
+    activate
+  end tell
+end run
+APPLESCRIPT
+  fi
+}
+
+act_on() { # 選択行のキーを解釈して実行
+  local key=$1
+  IFS=':' read -r kind a b c _ <<< "$key"
+  case "$kind" in
+    jump)
+      local tty=$a agent=$b sid=$c
+      local cwd="${key#jump:$tty:$agent:$sid:}"
+      if [[ -n "$tty" ]]; then
+        focus_tty "$tty"
+      else
+        echo "ttyが特定できないため resume で開きます" >&2
+        open_resume "$agent" "$sid" "$cwd"
+      fi
+      ;;
+    resume)
+      local agent=$a sid=$b cwd="${key#resume:$a:$b:}"
+      open_resume "$agent" "$sid" "$cwd"
+      ;;
+  esac
+}
+
+# ---- エントリポイント ----------------------------------------------------------
+case "${1:-pick}" in
+  web)
+    script_path=$(readlink "$0" 2>/dev/null || echo "$0")
+    exec bun run "$(dirname "$script_path")/../web/server.ts"
+    ;;
+  list)
+    build_list | cut -f2- | column -t -s$'\t'
+    ;;
+  watch)
+    while true; do
+      clear
+      echo "agd — $(date '+%H:%M:%S')  (● busy ▲ waiting ○ idle - resumable)"
+      echo
+      build_list | cut -f2- | column -t -s$'\t'
+      sleep 2
+    done
+    ;;
+  pick|*)
+    sel=$(build_list | fzf --delimiter=$'\t' --with-nth=2.. \
+            --header='Enter: ジャンプ/resume  (● busy ▲ waiting ○ idle - resumable)' \
+            --no-sort --ansi --tabstop=2) || exit 0
+    act_on "$(echo "$sel" | cut -f1)"
+    ;;
+esac

@@ -1,0 +1,10 @@
+.DS_Store
+nohup.out
+__pycache__/
+*.pyc
+web/.venv/
+
+# ローカル運用メモ(公開対象外)
+ISSUES.md
+research-*.md
+trial-guide.md
