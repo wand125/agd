@@ -86,9 +86,35 @@ let pathStrip = "";  // AGD_PATH_STRIP で指定された共通プレフィッ�
 function shortCwd(c) {
   let s = c || "";
   if (pathStrip && s.startsWith(pathStrip)) s = "…" + s.slice(pathStrip.length);
-  return s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~");
+  return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
 }
 function esc(t) { return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+// ---------------- マスクモード(スクリーンショット用) ----------------
+// 決定的スクランブル: 英字→英字・数字→数字・CJK→ダミー漢字。空白/記号/罫線は保持するので
+// レイアウトと ANSI カラーはそのまま、内容だけが読めなくなる。:mask で切替
+let maskMode = localStorage.getItem("agd-mask") === "1";
+const MASK_CJK = ["内", "容", "秘", "匿", "伏", "字", "例", "文", "何", "処"];
+function maskText(t) {
+  if (!maskMode || !t) return t;
+  let out = "";
+  for (const ch of t) {
+    const c = ch.codePointAt(0);
+    if (c >= 97 && c <= 122) out = out + String.fromCharCode(97 + (c * 7 + 3) % 26);        // a-z
+    else if (c >= 65 && c <= 90) out = out + String.fromCharCode(65 + (c * 7 + 3) % 26);    // A-Z
+    else if (c >= 48 && c <= 57) out = out + String.fromCharCode(48 + (c * 7 + 3) % 10);    // 0-9
+    else if (c >= 0x3040) out = out + MASK_CJK[c % MASK_CJK.length];                        // かな・漢字等
+    else out = out + ch;                                                                     // 空白・記号・罫線
+  }
+  return out;
+}
+function toggleMask() {
+  maskMode = !maskMode;
+  localStorage.setItem("agd-mask", maskMode ? "1" : "0");
+  document.querySelectorAll(".screen").forEach(el => delete el.dataset.raw);  // 画面キャッシュ無効化
+  render();
+  if (detailKey) renderLog(false);
+  toast(maskMode ? "🎭 マスクモード ON(:mask で解除)" : "マスクモード OFF");
+}
 // エスケープ済みテキスト内の URL をリンク化(新しいタブで開く)。末尾の句読点や括弧は除外
 function linkify(escaped) {
   return escaped.replace(/(https?:\/\/[^\s<>"']+)/g, (m) => {
@@ -98,7 +124,7 @@ function linkify(escaped) {
 }
 function projName(cwd) {
   const parts = (cwd || "").split("/").filter(Boolean);
-  return parts[parts.length - 1] || cwd;
+  return maskText(parts[parts.length - 1] || cwd);
 }
 function projColor(cwd) {
   let h = 0;
@@ -136,7 +162,7 @@ function ansiToHtml(raw) {
   };
   const parts = cleaned.split(/\x1b\[([0-9;]*)m/);
   for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 0) { out += esc(parts[i]); continue; }
+    if (i % 2 === 0) { out += esc(maskText(parts[i])); continue; }
     const codes = (parts[i] || "0").split(";").map(Number);
     for (let k = 0; k < codes.length; k++) {
       const c = codes[k];
@@ -345,7 +371,7 @@ function renderGrid() {
     const pt = el.querySelector(".proj-tag");
     pt.textContent = projName(s.cwd);
     pt.style.background = projColor(s.cwd);
-    el.querySelector(".card-title").textContent = s.name;
+    el.querySelector(".card-title").textContent = maskText(s.name);
     el.querySelector(".card-meta").textContent = fmtAge(s.ageS);
     el.querySelector(".git-badge").innerHTML = gitBadge(s.git);
     el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.cwd));
@@ -444,6 +470,7 @@ const INTERNAL_CMDS = [
   { cmd: "esc", desc: "選択セッションに Esc(中断)を送信" },
   { cmd: "mode", desc: "選択セッションに ⇧Tab(モード切替)を送信" },
   { cmd: "key ", desc: "任意キー送信 (Up/Down/Left/Right/Tab/ShiftTab/Enter/Escape)" },
+  { cmd: "mask", desc: "マスクモード切替(スクリーンショット用に内容をスクランブル)" },
   { cmd: "/", desc: "スラッシュコマンドを選択セッションへ送信" },
 ];
 const slashCache = new Map(); // "agent|cwd" → [{cmd, desc}]
@@ -593,6 +620,8 @@ async function runCommand(c) {
     toast("非表示にしたセッションを再表示しました");
   } else if (c === "new") {
     openNew();
+  } else if (c === "mask") {
+    toggleMask();
   } else if (c.startsWith("/")) {
     // スラッシュコマンドを選択セッションへそのまま送信(:/clear など)
     sendTextToSelected(c);
@@ -606,7 +635,7 @@ async function runCommand(c) {
     if (valid.includes(k)) sendNamedKey(k, k);
     else toast(`不明なキー: ${k}(使用可: ${valid.join(" ")})`);
   } else if (c) {
-    toast(`未対応コマンド: :${c}(使用可: q / show / new / esc / mode / key <K> / /<cmd>)`);
+    toast(`未対応コマンド: :${c}(使用可: q / show / new / mask / esc / mode / key <K> / /<cmd>)`);
   }
 }
 
@@ -631,7 +660,7 @@ function buildRow(s, running) {
     <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
     <span class="card-meta"></span>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
-  row.querySelector(".card-title").textContent = s.name;
+  row.querySelector(".card-title").textContent = maskText(s.name);
   row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${s.status} · ${fmtAge(s.ageS)}`;
   const btns = document.createElement("span");
   if (running) {
@@ -652,7 +681,7 @@ function buildRow(s, running) {
 
 function gitBadge(g) {
   if (!g || !g.branch) return "";
-  let out = `⎇ ${esc(g.branch)}`;
+  let out = `⎇ ${esc(maskText(g.branch))}`;
   if (g.dirty) out += ` <span class="dirty">●${g.dirty}</span>`;
   if (g.ahead) out += ` ↑${g.ahead}`;
   if (g.behind) out += ` ↓${g.behind}`;
@@ -666,15 +695,15 @@ function renderPromptBar(bar, s) {
   const p = s.prompt;
   const opts = p?.options ?? [];
   let html = "";
-  if (p?.question) html += `<div class="prompt-q" title="${esc(p.question)}">${esc(p.question)}</div>`;
+  if (p?.question) html += `<div class="prompt-q" title="${esc(maskText(p.question))}">${esc(maskText(p.question))}</div>`;
   if (opts.length && p.kind === "numbered") {
     html += opts.map(o =>
-      `<button class="btn" data-mode="num" data-key="${esc(o.key)}" title="${esc(o.label)}">${esc(o.key)}. ${esc(o.label.slice(0, 24))}</button>`
+      `<button class="btn" data-mode="num" data-key="${esc(o.key)}" title="${esc(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
     ).join("");
   } else if (opts.length && p.kind === "cursor") {
     // カーソル選択: クリックで ↑/↓×n → Enter を送る
     html += opts.map((o, i) =>
-      `<button class="btn ${i === p.cursorIndex ? "cursor-on" : ""}" data-mode="cursor" data-index="${i}" title="${esc(o.label)}">${i + 1}. ${i === p.cursorIndex ? "❯ " : ""}${esc(o.label.slice(0, 22))}</button>`
+      `<button class="btn ${i === p.cursorIndex ? "cursor-on" : ""}" data-mode="cursor" data-index="${i}" title="${esc(maskText(o.label))}">${i + 1}. ${i === p.cursorIndex ? "❯ " : ""}${esc(maskText(o.label.slice(0, 22)))}</button>`
     ).join("");
     html += `<button class="btn" data-mode="key" data-key="Escape">Esc</button>`;
   } else {
@@ -942,7 +971,7 @@ async function openDetail(key) {
   if (!s) return;
   $("overlay").classList.add("show");
   $("d-agent").textContent = s.agent;
-  $("d-title").textContent = s.name;
+  $("d-title").textContent = maskText(s.name);
   $("d-meta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
   $("d-dot").style.background = getComputedStyle(document.documentElement).getPropertyValue(`--${s.status}`) || "#666";
   detailScrolled = false;
@@ -1034,7 +1063,7 @@ async function loadSubagents(s) {
     if (!subagents.length) { sel.style.display = "none"; return; }
     const cur = sel.value;
     sel.innerHTML = `<option value="">本体</option>` + subagents.map(a =>
-      `<option value="${esc(a.id)}">${a.active ? "● " : ""}sub: ${esc(a.name)}</option>`).join("");
+      `<option value="${esc(a.id)}">${a.active ? "● " : ""}sub: ${esc(maskText(a.name))}</option>`).join("");
     sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
     sel.style.display = "";
   } catch {}
@@ -1078,7 +1107,8 @@ function renderLog(force) {
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   const older = logStart > 0
     ? `<div class="load-older" onclick="loadOlder()">▲ さらに読み込む(残り ${logStart} 件)</div>` : "";
-  log.innerHTML = older + logEntries.map((e, idx) => {
+  log.innerHTML = older + logEntries.map((e0, idx) => {
+    const e = maskMode ? { ...e0, text: maskText(e0.text) } : e0;
     const ts = e.ts ? `<span class="ts">${e.ts.slice(11, 19)}</span> ` : "";
     if (e.role === "user") return `<div class="entry user">${ts}${linkify(esc(e.text))}</div>`;
     if (e.role === "assistant") return `<div class="entry assistant">${ts}${linkify(esc(e.text))}</div>`;
@@ -1099,8 +1129,9 @@ function renderLog(force) {
       if (!s) return;
       const { entry } = await fetchTranscript(s, { entry: logStart + i });
       if (entry) {
+        const me = maskMode ? { ...entry, text: maskText(entry.text) } : entry;
         const pre = el.querySelector("pre");
-        pre.innerHTML = entry.role === "tool_use" ? renderToolUse(entry) : linkify(esc(entry.text));
+        pre.innerHTML = me.role === "tool_use" ? renderToolUse(me) : linkify(esc(me.text));
         full.remove();
       }
     };
@@ -1165,8 +1196,8 @@ async function runSearch(q) {
       <strong></strong>
       <span class="card-meta"> ${h.count}件 · ${fmtAge(Math.floor((Date.now() - h.mtime) / 1000))}</span>
       <div class="snippet"></div>`;
-    row.querySelector("strong").textContent = h.name;
-    row.querySelector(".snippet").textContent = h.snippet;
+    row.querySelector("strong").textContent = maskText(h.name);
+    row.querySelector(".snippet").textContent = maskText(h.snippet);
     row.onclick = () => {
       closeSearch();
       if (!sessionOf(`${h.agent}:${h.sid}`)) {
