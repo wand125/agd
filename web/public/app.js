@@ -699,8 +699,8 @@ function renderPromptBar(bar, s) {
   let html = "";
   if (p?.question) html += `<div class="prompt-q" title="${esc(maskText(p.question))}">${esc(maskText(p.question))}</div>`;
   if (opts.length && p.kind === "numbered") {
-    html += opts.map(o =>
-      `<button class="btn" data-mode="num" data-key="${esc(o.key)}" title="${esc(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
+    html += opts.map((o, i) =>
+      `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${esc(o.key)}" data-index="${i}" title="${esc(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
     ).join("");
   } else if (opts.length && p.kind === "cursor") {
     // カーソル選択: クリックで ↑/↓×n → Enter を送る
@@ -722,7 +722,9 @@ function renderPromptBar(bar, s) {
       e.stopPropagation();
       b.disabled = true;
       let r;
-      if (b.dataset.mode === "cursor") {
+      const cursorStyle = b.dataset.mode === "cursor" ||
+        (b.dataset.mode === "num" && s.agent === "codex");  // codexの番号付きはカーソル移動で選ぶ
+      if (cursorStyle) {
         const delta = Number(b.dataset.index) - (p.cursorIndex ?? 0);
         const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
         r = await api("/api/key", { tty: s.tty, keys });
@@ -737,20 +739,25 @@ function renderPromptBar(bar, s) {
 
 // ---------------- 操作 ----------------
 // 数字キーで許可プロンプトの選択肢に応答(番号型/カーソル型両対応)。グリッド・詳細・リストで共用
+// n番目の選択肢まで ↑/↓ を送って Enter で確定(カーソル移動方式)
+function answerByCursor(s, n) {
+  const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
+  const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
+  api("/api/key", { tty: s.tty, keys }).then(() => toast(`選択肢 ${n} を確定しました`));
+}
 function answerPromptByNumber(sessKey, n) {
   const s = sessionOf(sessKey);
   if (!(s?.status === "waiting" && s.tty && s.prompt)) return false;
-  if (s.prompt.kind === "numbered" && (s.prompt.options ?? []).some(o => o.key === String(n))) {
+  const count = (s.prompt.options ?? []).length;
+  if (n > count) return false;
+  if (s.prompt.kind === "numbered" && s.agent === "claude") {
+    // claude の番号付きプロンプトは数字キーで直接選択できる
     api("/api/key", { tty: s.tty, key: String(n) }).then(() => toast(`「${n}」を送信しました`));
     return true;
   }
-  if (s.prompt.kind === "cursor" && n <= (s.prompt.options ?? []).length) {
-    const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
-    const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-    api("/api/key", { tty: s.tty, keys }).then(() => toast(`選択肢 ${n} を確定しました`));
-    return true;
-  }
-  return false;
+  // codex の番号付き・両者のカーソル型はカーソル移動+Enter で確定
+  answerByCursor(s, n);
+  return true;
 }
 // 空欄 Enter での「確定」: 入力待ちセッションにのみ Enter キーを送る(誤爆防止)
 let confirmBusy = false;

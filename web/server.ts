@@ -369,15 +369,16 @@ function detectPrompt(screen: string | undefined): PromptInfo | null {
     .replace(/\x1b\[[0-9;]*m/g, "")
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
     .replace(/\x00/g, " ");
+  // カーソル記号は claude の ❯(U+276F)と codex の ›(U+203A)の両方を受け付ける
   const lines = plain.split("\n").slice(-18).map(l => l.replace(/[│┃]/g, " ").trimEnd());
-  const optRe = /^\s*(❯)?\s*(\d+)\.\s+(.+)$/;
+  const optRe = /^\s*([❯›])?\s*(\d+)\.\s+(.+)$/;
   const opts: { key: string; label: string }[] = [];
-  let hasCursor = false, firstIdx = -1;
+  let hasCursor = false, firstIdx = -1, numCursorIdx = 0;
   lines.forEach((l, i) => {
     const m = l.match(optRe);
     if (m) {
       if (opts.length === 0) firstIdx = i;
-      if (m[1]) hasCursor = true;
+      if (m[1]) { hasCursor = true; numCursorIdx = opts.length; }
       opts.push({ key: m[2], label: m[3].trim().slice(0, 70) });
     }
   });
@@ -389,13 +390,13 @@ function detectPrompt(screen: string | undefined): PromptInfo | null {
     return undefined;
   };
   if (opts.length >= 2 && hasCursor)
-    return { question: findQuestion(firstIdx), options: opts.slice(0, 8), kind: "numbered" };
+    return { question: findQuestion(firstIdx), options: opts.slice(0, 8), kind: "numbered", cursorIndex: numCursorIdx };
   // 非番号のカーソル選択(❯ Yes 形式)。空の入力プロンプト(❯ のみ)は除外
-  const cursorIdx = lines.findIndex(l => /^\s*❯\s+\S/.test(l) && !optRe.test(l));
+  const cursorIdx = lines.findIndex(l => /^\s*[❯›]\s+\S/.test(l) && !optRe.test(l));
   if (cursorIdx >= 0) {
     // カーソル行の上下に連続する「選択肢らしい行」をブロックとして解析
     const isOpt = (l: string) => {
-      const t = l.replace(/^\s*❯?\s*/, "").trim();
+      const t = l.replace(/^\s*[❯›]?\s*/, "").trim();
       return t.length > 0 && t.length <= 80 &&
         !/[??]$/.test(t) &&                       // 質問文
         !/[┌┐└┘─╭╮╰╯═━]/.test(t) &&               // 罫線
@@ -406,7 +407,7 @@ function detectPrompt(screen: string | undefined): PromptInfo | null {
     while (end < lines.length - 1 && isOpt(lines[end + 1])) end++;
     const copts: { key: string; label: string }[] = [];
     for (let i = start; i <= end; i++)
-      copts.push({ key: `opt:${i - start}`, label: lines[i].replace(/^\s*❯?\s*/, "").trim().slice(0, 70) });
+      copts.push({ key: `opt:${i - start}`, label: lines[i].replace(/^\s*[❯›]?\s*/, "").trim().slice(0, 70) });
     if (copts.length >= 2 && copts.length <= 8)
       return { question: findQuestion(start), options: copts, kind: "cursor", cursorIndex: cursorIdx - start };
     return { options: [] };
