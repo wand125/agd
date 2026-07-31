@@ -734,6 +734,22 @@ function renderPromptBar(bar, s) {
 }
 
 // ---------------- 操作 ----------------
+// 数字キーで許可プロンプトの選択肢に応答(番号型/カーソル型両対応)。グリッド・詳細・リストで共用
+function answerPromptByNumber(sessKey, n) {
+  const s = sessionOf(sessKey);
+  if (!(s?.status === "waiting" && s.tty && s.prompt)) return false;
+  if (s.prompt.kind === "numbered" && (s.prompt.options ?? []).some(o => o.key === String(n))) {
+    api("/api/key", { tty: s.tty, key: String(n) }).then(() => toast(`「${n}」を送信しました`));
+    return true;
+  }
+  if (s.prompt.kind === "cursor" && n <= (s.prompt.options ?? []).length) {
+    const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
+    const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
+    api("/api/key", { tty: s.tty, keys }).then(() => toast(`選択肢 ${n} を確定しました`));
+    return true;
+  }
+  return false;
+}
 // 空欄 Enter での「確定」: 入力待ちセッションにのみ Enter キーを送る(誤爆防止)
 let confirmBusy = false;
 async function confirmEnter(key) {
@@ -815,6 +831,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Enter" || e.key === "o") { e.preventDefault(); toggleDetailEntry(); }
     else if (e.key === "l") toggleDetailEntry(true);
     else if (e.key === "h") toggleDetailEntry(false);
+    else if (/^[1-9]$/.test(e.key) && detailKey) answerPromptByNumber(detailKey, Number(e.key));
     else if (e.key === "i") { e.preventDefault(); $("d-input").focus(); }
     else if (e.key === "f" && detailKey) jump(detailKey);
     else if (e.key === "Escape" || e.key === "q") closeDetail();
@@ -849,6 +866,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "m" && s?.running) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
     else if (e.key === "s" && s?.running) sendNamedKey("Escape", "Esc(中断)");
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && s) { e.preventDefault(); resumeContinue(listKey); }
+    else if (/^[1-9]$/.test(e.key) && s?.running) answerPromptByNumber(listKey, Number(e.key));
     else if (e.key === "p" && s) togglePin(s.cwd);
     else if (e.key === "n") { e.preventDefault(); openNew(); }
     else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
@@ -923,20 +941,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "s" && kbdKey) sendNamedKey("Escape", "Esc(中断)");
   else if (e.key === "p" && kbdKey) togglePin(sessionOf(kbdKey)?.cwd);
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
-  else if (/^[1-9]$/.test(e.key) && sel) {
-    const s = sessionOf(kbdKey);
-    const n = Number(e.key);
-    if (s?.status === "waiting" && s.tty && s.prompt) {
-      if (s.prompt.kind === "numbered" && (s.prompt.options ?? []).some(o => o.key === e.key)) {
-        api("/api/key", { tty: s.tty, key: e.key }).then(() => toast(`「${e.key}」を送信しました`));
-      } else if (s.prompt.kind === "cursor" && n <= (s.prompt.options ?? []).length) {
-        // カーソル型: n番目まで ↑/↓ を送って Enter で確定
-        const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
-        const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-        api("/api/key", { tty: s.tty, keys }).then(() => toast(`選択肢 ${n} を確定しました`));
-      }
-    }
-  }
+  else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
 });
 
 // ---------------- 詳細ビュー ----------------
@@ -1173,7 +1178,7 @@ $("d-input").onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDetail(); }  // ⇧⏎ は改行
   if (e.key === "Escape") $("d-input").blur();  // スクロールモードへ(閉じるのは q/Esc)
 };
-const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>g/G</kbd>端 <kbd>⏎</kbd>開閉 <kbd>h/l</kbd>閉/開 <kbd>i</kbd>入力 <kbd>q</kbd>閉じる";
+const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>g/G</kbd>端 <kbd>⏎</kbd>開閉 <kbd>h/l</kbd>閉/開 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>q</kbd>閉じる";
 const D_HINT_INSERT = "<kbd>⏎</kbd>送信 <kbd>⇧⏎</kbd>改行 <kbd>Esc</kbd>スクロールモードへ";
 $("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = D_HINT_INSERT; };
 $("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = D_HINT_SCROLL; };
