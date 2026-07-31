@@ -4,6 +4,10 @@ A keyboard-driven (vim-style) dashboard for running many **Claude Code** and **C
 
 [日本語版 README はこちら](README.ja.md)
 
+![agd demo](docs/demo.gif)
+
+*(demo recorded with the built-in `:mask` mode — layout and colors are real, text is scrambled. [Higher-quality video](docs/demo.mp4))*
+
 agd discovers **existing sessions** — including ones you started in plain iTerm2 tabs or tmux panes — and gives you:
 
 - **Live screen grid** — full-color terminal screens of every running session, updated every 2.5s, with pagination (no scrolling)
