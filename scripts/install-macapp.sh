@@ -11,7 +11,9 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUN="$(command -v bun)"
 PORT="${AGD_PORT:-8787}"
 PLIST="$HOME/Library/LaunchAgents/com.agd.server.plist"
-APP="$HOME/Applications/agd.app"
+# /Applications に書ければそこへ(標準の場所)、無理なら ~/Applications
+APP="/Applications/agd.app"
+[[ -w /Applications ]] || APP="$HOME/Applications/agd.app"
 PROFILE_DIR="$HOME/.cache/agd/chrome-profile"
 
 # ---- 1. launchd: サーバー常駐 --------------------------------------------------
@@ -90,5 +92,5 @@ fi
 touch "$APP"
 # Spotlight / Finder から見つかるよう LaunchServices に登録
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true
-echo "✓ ~/Applications/agd.app 作成(専用プロファイル: $PROFILE_DIR)"
+echo "✓ ${APP} 作成(専用プロファイル: $PROFILE_DIR)"
 echo "  Spotlight や Dock から「agd」で起動できます"
