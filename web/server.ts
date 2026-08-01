@@ -1,7 +1,8 @@
 // agd web — AI Agent Session Dashboard server (Bun)
 // 実行中の Claude Code / Codex セッションの一覧・ライブ画面・ログ閲覧・入力送信・通知を
 // ブラウザに提供する。起動: bun run server.ts (デフォルト http://localhost:8787)
-import { readdirSync, statSync, existsSync, readFileSync, openSync, readSync, closeSync } from "fs";
+import { readdirSync, statSync, existsSync, readFileSync, openSync, readSync, closeSync, mkdirSync } from "fs";
+import { Database } from "bun:sqlite";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -871,6 +872,171 @@ async function searchLogs(q: string): Promise<SearchHit[]> {
   return hits;
 }
 
+// ---------------------------------------------------------------- 全文検索インデックス(SQLite FTS5)
+// 直近 AGD_INDEX_DAYS(既定30日)のトランスクリプトを trigram FTS でインデックスする。
+// 3文字未満の語を含むクエリは LIKE にフォールバック(日本語2文字語対応)。
+const INDEX_DAYS = Number(process.env.AGD_INDEX_DAYS || 30);
+const INDEX_TEXT_CAP = 8000;
+mkdirSync(join(HOME, ".cache", "agd"), { recursive: true });
+const searchDb = new Database(join(HOME, ".cache", "agd", "search.db"));
+searchDb.run(`CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER, agent TEXT, sid TEXT)`);
+searchDb.run(`CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT, idx INTEGER, role TEXT, ts TEXT, text TEXT)`);
+searchDb.run(`CREATE INDEX IF NOT EXISTS entries_path ON entries(path)`);
+searchDb.run(`CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(text, content='entries', content_rowid='id', tokenize='trigram')`);
+let indexReady = false;
+let indexProgress = { done: 0, total: 0 };
+
+type IndexTarget = { path: string; agent: "claude" | "codex"; sid: string; mtime: number };
+function indexTargets(): IndexTarget[] {
+  const cutoff = Date.now() - INDEX_DAYS * 86400_000;
+  const out: IndexTarget[] = [];
+  try {
+    for (const d of readdirSync(CLAUDE_PROJECTS)) {
+      const dir = join(CLAUDE_PROJECTS, d);
+      let fs2: string[] = [];
+      try { fs2 = readdirSync(dir).filter(f => f.endsWith(".jsonl")); } catch { continue; }
+      for (const f of fs2) {
+        try {
+          const st = statSync(join(dir, f));
+          if (st.mtimeMs > cutoff) out.push({ path: join(dir, f), agent: "claude", sid: f.replace(/\.jsonl$/, ""), mtime: st.mtimeMs });
+        } catch {}
+      }
+    }
+  } catch {}
+  for (const m of rolloutCache.values())
+    if (m.id && m.mtime * 1000 > cutoff) out.push({ path: m.path, agent: "codex", sid: m.id, mtime: m.mtime * 1000 });
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+// ファイルの追記分だけをインデックスに反映(オフセットは行境界で管理)
+function indexFile(t: IndexTarget) {
+  let st;
+  try { st = statSync(t.path); } catch { return; }
+  const row = searchDb.query(`SELECT offset FROM files WHERE path = ?`).get(t.path) as { offset: number } | null;
+  let offset = row?.offset ?? 0;
+  if (st.size < offset) {
+    // ファイルが縮んだ → 作り直し
+    searchDb.run(`DELETE FROM entries WHERE path = ?`, [t.path]);
+    searchDb.run(`INSERT INTO entries_fts(entries_fts) VALUES('rebuild')`);
+    offset = 0;
+  }
+  if (st.size <= offset) {
+    searchDb.run(`INSERT INTO files(path, offset, agent, sid) VALUES(?, ?, ?, ?)
+                  ON CONFLICT(path) DO UPDATE SET offset = excluded.offset`, [t.path, offset, t.agent, t.sid]);
+    return;
+  }
+  try {
+    const fd = openSync(t.path, "r");
+    const len = st.size - offset;
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, offset);
+    closeSync(fd);
+    const chunk = buf.toString("utf8");
+    const lastNl = chunk.lastIndexOf("\n");
+    if (lastNl < 0) return;
+    const complete = chunk.slice(0, lastNl);
+    offset += Buffer.byteLength(complete, "utf8") + 1;
+    const lines = complete.split("\n").filter(Boolean);
+    const parsed = t.agent === "claude" ? parseClaudeLines(lines) : parseCodexLines(lines);
+    const base = (searchDb.query(`SELECT COALESCE(MAX(idx) + 1, 0) AS n FROM entries WHERE path = ?`).get(t.path) as any).n;
+    const insE = searchDb.prepare(`INSERT INTO entries(path, idx, role, ts, text) VALUES(?, ?, ?, ?, ?)`);
+    const insF = searchDb.prepare(`INSERT INTO entries_fts(rowid, text) VALUES(?, ?)`);
+    const tx = searchDb.transaction(() => {
+      parsed.forEach((e, i) => {
+        const text = e.text.slice(0, INDEX_TEXT_CAP);
+        insE.run(t.path, base + i, e.role, e.ts ?? "", text);
+        insF.run(Number((searchDb.query(`SELECT last_insert_rowid() AS id`).get() as any).id), text);
+      });
+      searchDb.run(`INSERT INTO files(path, offset, agent, sid) VALUES(?, ?, ?, ?)
+                    ON CONFLICT(path) DO UPDATE SET offset = excluded.offset`, [t.path, offset, t.agent, t.sid]);
+    });
+    tx();
+  } catch {}
+}
+
+async function buildIndex() {
+  const targets = indexTargets();
+  indexProgress = { done: 0, total: targets.length };
+  // 期間外の古いファイルをインデックスから掃除
+  const keep = new Set(targets.map(t => t.path));
+  const stale = searchDb.query(`SELECT path FROM files`).all() as { path: string }[];
+  let pruned = false;
+  for (const r of stale) if (!keep.has(r.path)) {
+    searchDb.run(`DELETE FROM entries WHERE path = ?`, [r.path]);
+    searchDb.run(`DELETE FROM files WHERE path = ?`, [r.path]);
+    pruned = true;
+  }
+  if (pruned) searchDb.run(`INSERT INTO entries_fts(entries_fts) VALUES('rebuild')`);
+  for (const t of targets) {
+    indexFile(t);
+    indexProgress.done++;
+    await Bun.sleep(15);  // ポーリング処理を妨げないよう小刻みに譲る
+  }
+  indexReady = true;
+  console.log(`search index ready: ${indexProgress.total} files`);
+}
+setTimeout(() => buildIndex().catch(e => console.error("index build error:", e)), 3000);
+
+function refreshIndexQuick() {
+  // 検索時に「伸びているファイル」だけ即時反映(最大20件)
+  let n = 0;
+  for (const t of indexTargets()) {
+    if (n >= 20) break;
+    try {
+      const st = statSync(t.path);
+      const row = searchDb.query(`SELECT offset FROM files WHERE path = ?`).get(t.path) as { offset: number } | null;
+      if (!row || st.size !== row.offset) { indexFile(t); n++; }
+    } catch {}
+  }
+}
+
+function searchIndex(q: string): SearchHit[] {
+  const words = q.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const useFts = words.every(w => [...w].length >= 3);
+  let rows: { path: string; idx: number; text: string }[];
+  if (useFts) {
+    const match = words.map(w => `"${w.replaceAll(`"`, `""`)}"`).join(" AND ");
+    rows = searchDb.query(
+      `SELECT e.path AS path, e.idx AS idx, e.text AS text
+       FROM entries_fts f JOIN entries e ON e.id = f.rowid
+       WHERE entries_fts MATCH ? ORDER BY e.id DESC LIMIT 800`).all(match) as any;
+  } else {
+    const conds = words.map(() => `text LIKE ? ESCAPE '\\'`).join(" AND ");
+    const args = words.map(w => `%${w.replace(/[%_\\]/g, m => "\\" + m)}%`);
+    rows = searchDb.query(
+      `SELECT path, idx, text FROM entries WHERE ${conds} ORDER BY id DESC LIMIT 800`).all(...args) as any;
+  }
+  // セッション(ファイル)単位に集約
+  const byPath = new Map<string, { count: number; first: { idx: number; text: string } }>();
+  for (const r of rows) {
+    const g = byPath.get(r.path);
+    if (g) g.count++;
+    else byPath.set(r.path, { count: 1, first: { idx: r.idx, text: r.text } });
+  }
+  const hits: SearchHit[] = [];
+  for (const [path, g] of byPath) {
+    if (hits.length >= 30) break;
+    const meta = searchDb.query(`SELECT agent, sid FROM files WHERE path = ?`).get(path) as { agent: string; sid: string } | null;
+    if (!meta) continue;
+    let mtime = 0;
+    try { mtime = statSync(path).mtimeMs; } catch {}
+    const lower = g.first.text.toLowerCase();
+    const pos = lower.indexOf(words[0].toLowerCase());
+    const snippet = g.first.text.slice(Math.max(0, pos - 60), (pos < 0 ? 0 : pos) + words[0].length + 120).replace(/\n/g, " ");
+    let cwd = "", name = "";
+    if (meta.agent === "claude") {
+      try { cwd = readFileSync(path, "utf8").slice(0, 200_000).match(/"cwd":"([^"]+)"/)?.[1] ?? ""; } catch {}
+      name = claudeNameFor(meta.sid, path);
+    } else {
+      cwd = rolloutById(meta.sid)?.cwd ?? "";
+      name = codexNames.get(meta.sid) || meta.sid;
+    }
+    hits.push({ agent: meta.agent, sid: meta.sid, name, cwd, mtime, count: g.count, snippet });
+  }
+  return hits.sort((a, b) => b.mtime - a.mtime);
+}
+
 // ---------------------------------------------------------------- 新規セッション起動
 async function openNew(agent: string, cwd: string): Promise<string> {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -1007,7 +1173,12 @@ try {
     if (url.pathname === "/api/search") {
       const q = url.searchParams.get("q") ?? "";
       if (q.length < 2) return Response.json({ hits: [] });
-      return Response.json({ hits: await searchLogs(q) });
+      if (indexReady) {
+        refreshIndexQuick();
+        return Response.json({ hits: searchIndex(q) });
+      }
+      // インデックス構築中は従来の grep 検索でしのぐ
+      return Response.json({ hits: await searchLogs(q), indexing: indexProgress });
     }
     if (url.pathname === "/api/slash") {
       const agent = url.searchParams.get("agent") ?? "claude";
@@ -1036,9 +1207,15 @@ try {
       return Response.json({ result: r });
     }
     if (req.method === "POST" && url.pathname === "/api/new") {
-      const { agent, cwd } = await req.json();
+      const { agent, cwd, create } = await req.json();
       const abs = String(cwd ?? "").replace(/^~(?=\/|$)/, HOME);
-      if (!abs || !existsSync(abs)) return Response.json({ error: "invalid cwd" }, { status: 400 });
+      if (!abs.startsWith("/")) return Response.json({ error: "invalid cwd" }, { status: 400 });
+      if (!existsSync(abs)) {
+        if (!create) return Response.json({ error: "invalid cwd" }, { status: 400 });
+        try { mkdirSync(abs, { recursive: true }); } catch (e: any) {
+          return Response.json({ error: "mkdir failed: " + (e?.message ?? e) }, { status: 400 });
+        }
+      }
       const r = await openNew(agent === "codex" ? "codex" : "claude", abs);
       return Response.json({ result: r });
     }
@@ -1076,7 +1253,9 @@ try {
     if (url.pathname === "/api/dirs") {
       // パス入力補完: q の親ディレクトリを列挙して前方一致のディレクトリを返す
       const q = (url.searchParams.get("q") ?? "").replace(/^~(?=\/|$)/, HOME);
-      if (!q.startsWith("/")) return Response.json({ dirs: [] });
+      if (!q.startsWith("/")) return Response.json({ dirs: [], exists: false });
+      let exists = false;
+      try { exists = statSync(q).isDirectory(); } catch {}
       const cut = q.lastIndexOf("/");
       const base = cut === 0 ? "/" : q.slice(0, cut);
       const prefix = q.slice(cut + 1).toLowerCase();
@@ -1090,7 +1269,7 @@ try {
           try { if (statSync(full).isDirectory()) dirs.push(full); } catch {}
         }
       } catch {}
-      return Response.json({ dirs });
+      return Response.json({ dirs, exists });
     }
     if (req.method === "POST" && url.pathname === "/api/send") {
       const { tty, text } = await req.json();

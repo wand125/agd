@@ -75,7 +75,7 @@ Press `?` in the dashboard for the full list. Highlights:
 | Variable | Effect |
 |---|---|
 | `AGD_PORT` | dashboard port (default 8787) |
-| `AGD_PATH_STRIP` | path prefix to abbreviate as `…` in the UI (e.g. `~/projects`) |
+|  `AGD_PATH_STRIP` | path prefix to abbreviate as `…` in the UI (e.g. `~/projects`) |
 
 macOS notifications are toggled from the dashboard header (stored in `~/.cache/agd/config.json`).
 

@@ -1194,11 +1194,17 @@ $("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = D_HINT_SC
 async function runSearch(q) {
   $("search-overlay").classList.add("show");
   $("search-q").textContent = q;
-  $("search-results").innerHTML = "検索中…(10秒ほどかかります)";
+  $("search-results").innerHTML = "検索中…";
   const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const { hits } = await r.json();
+  const { hits, indexing } = await r.json();
   if (!hits.length) { $("search-results").innerHTML = "ヒットなし"; return; }
   $("search-results").innerHTML = "";
+  if (indexing) {
+    const note = document.createElement("div");
+    note.className = "card-meta";
+    note.textContent = `⏳ 全文インデックス構築中 (${indexing.done}/${indexing.total}) — 完了までは簡易検索の結果です`;
+    $("search-results").appendChild(note);
+  }
   hits.forEach(h => {
     const row = document.createElement("div");
     row.className = "hit-row";
@@ -1252,44 +1258,55 @@ function openNew() {
 }
 function closeNew() { $("new-overlay").classList.remove("show"); }
 let newDirCands = [];  // パス入力モードのディレクトリ候補
+let newDirExists = false;  // 入力中のパスが既存ディレクトリか
 let dirFetchSeq = 0;
 function isPathMode() {
   const q = $("new-cwd").value.trim();
   return q.startsWith("/") || q.startsWith("~");
 }
 function newFiltered() {
-  const q = $("new-cwd").value.trim().toLowerCase();
-  if (isPathMode()) return newDirCands.map(d => ({ cwd: d, ageS: Infinity }));
-  return newProjects.filter(p => !q || p.cwd.toLowerCase().includes(q)).slice(0, 12);
+  const q = $("new-cwd").value.trim();
+  if (isPathMode()) {
+    if (newDirCands.length) return newDirCands.map(d => ({ cwd: d, ageS: Infinity }));
+    // 補完候補なし & 未存在パス → 「作成して起動」を選択肢として出す
+    if (!newDirExists && q.length > 1 && !q.endsWith("/")) return [{ cwd: q, ageS: Infinity, create: true }];
+    return [];
+  }
+  const ql = q.toLowerCase();
+  return newProjects.filter(p => !ql || p.cwd.toLowerCase().includes(ql)).slice(0, 12);
 }
 async function fetchDirCands() {
   const q = $("new-cwd").value.trim();
   const seq = ++dirFetchSeq;
   try {
     const r = await fetch(`/api/dirs?q=${encodeURIComponent(q)}`);
-    const { dirs } = await r.json();
+    const { dirs, exists } = await r.json();
     if (seq !== dirFetchSeq) return;  // 入力が進んでいたら破棄
     newDirCands = dirs;
+    newDirExists = !!exists;
     renderNewList();
   } catch {}
 }
 function renderNewList() {
   const list = newFiltered();
   if (newSel >= list.length) newSel = Math.max(0, list.length - 1);
-  $("new-list").innerHTML = list.map((p, i) => `
+  $("new-list").innerHTML = list.map((p, i) => p.create ? `
+    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}" data-create="1">
+      <span>📁 ディレクトリを作成して起動: ${esc(shortCwd(p.cwd))}</span>
+    </div>` : `
     <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}">
       <span class="proj-tag" style="background:${projColor(p.cwd)}">${esc(projName(p.cwd))}</span>
       <span>${esc(shortCwd(p.cwd))}</span>
       <span class="card-meta">${p.ageS === Infinity ? "" : fmtAge(p.ageS)}</span>
     </div>`).join("");
   [...$("new-list").children].forEach(row => {
-    row.onclick = () => launchNew(newAgent, row.dataset.cwd);
+    row.onclick = () => launchNew(newAgent, row.dataset.cwd, row.dataset.create === "1");
   });
 }
-async function launchNew(agent, cwd) {
+async function launchNew(agent, cwd, create = false) {
   if (!cwd || newLaunchBusy) return;
   newLaunchBusy = true;
-  const r = await api("/api/new", { agent, cwd });
+  const r = await api("/api/new", { agent, cwd, create });
   newLaunchBusy = false;
   if (r.error) { toast("起動失敗: " + r.error); return; }
   pendingSelect = {
@@ -1333,8 +1350,9 @@ $("new-cwd").oninput = () => {
 function launchFromPalette() {
   const typed = $("new-cwd").value.trim();
   // パス入力モードでもディレクトリ候補が選択されていればそれを優先
-  const cwd = newFiltered()[newSel]?.cwd ?? (isPathMode() ? typed : undefined);
-  if (cwd) launchNew(newAgent, cwd);
+  const item = newFiltered()[newSel];
+  const cwd = item?.cwd ?? (isPathMode() ? typed : undefined);
+  if (cwd) launchNew(newAgent, cwd, !!item?.create);
 }
 function newMoveSel(d) {
   const list = newFiltered();
