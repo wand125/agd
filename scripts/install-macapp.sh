@@ -88,5 +88,7 @@ if command -v magick > /dev/null && [[ -f "$REPO_DIR/web/public/favicon-256.png"
   magick "$REPO_DIR/web/public/favicon-256.png" "$APP/Contents/Resources/agd.icns" 2>/dev/null || true
 fi
 touch "$APP"
+# Spotlight / Finder から見つかるよう LaunchServices に登録
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true
 echo "✓ ~/Applications/agd.app 作成(専用プロファイル: $PROFILE_DIR)"
 echo "  Spotlight や Dock から「agd」で起動できます"
