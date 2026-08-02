@@ -65,6 +65,12 @@ fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PROFILE_DIR"
 cat > "$APP/Contents/MacOS/agd" <<LAUNCHER
 #!/usr/bin/env bash
+# 既に専用プロファイルのインスタンスが動いていれば新規ウィンドウを開かず前面化する
+PID=\$(ps -axo pid=,command= | grep -F -- "--user-data-dir=$PROFILE_DIR" | grep -v Helper | grep -v grep | awk '{print \$1}' | head -1)
+if [[ -n "\$PID" ]]; then
+  osascript -e "tell application \\"System Events\\" to set frontmost of (first process whose unix id is \$PID) to true" 2>/dev/null
+  exit 0
+fi
 exec "$CHROME" \\
   --app="http://localhost:${PORT}" \\
   --user-data-dir="$PROFILE_DIR" \\
