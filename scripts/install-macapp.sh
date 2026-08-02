@@ -49,23 +49,30 @@ sleep 1  # bootout 完了待ち(直後の bootstrap がレースで失敗する�
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "✓ launchd: com.agd.server 登録(ログイン時自動起動、ログ: /tmp/agd-server.log)"
 
-# ---- 2. agd.app(Chrome アプリモード・専用プロファイル) -----------------------
-CHROME=""
-for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-         "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
-         "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
-         "/Applications/Chromium.app/Contents/MacOS/Chromium"; do
-  [[ -x "$c" ]] && CHROME="$c" && break
-done
-if [[ -z "$CHROME" ]]; then
-  echo "✗ Chromium系ブラウザが見つかりません(agd.app はスキップ。ブラウザで http://localhost:${PORT} を開いてください)"
-  exit 0
-fi
+# ---- 2. agd.app ----------------------------------------------------------------
+# 優先: WKWebView ネイティブシェル(swiftc があれば)。Dock クリックで既存ウィンドウに
+# フォーカスし、Chrome と完全に無関係(ブラウザ自動化との干渉ゼロ)。
+# フォールバック: Chrome アプリモード(専用プロファイル)。
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$PROFILE_DIR"
-cat > "$APP/Contents/MacOS/agd" <<LAUNCHER
+if command -v swiftc > /dev/null; then
+  echo "  swiftc でネイティブシェルをコンパイル中…"
+  swiftc -O -o "$APP/Contents/MacOS/agd" "$REPO_DIR/scripts/AgdApp.swift" -framework Cocoa -framework WebKit
+else
+  CHROME=""
+  for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+           "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+           "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+           "/Applications/Chromium.app/Contents/MacOS/Chromium"; do
+    [[ -x "$c" ]] && CHROME="$c" && break
+  done
+  if [[ -z "$CHROME" ]]; then
+    echo "✗ swiftc も Chromium系ブラウザも見つかりません(agd.app はスキップ)"
+    exit 0
+  fi
+  mkdir -p "$PROFILE_DIR"
+  cat > "$APP/Contents/MacOS/agd" <<LAUNCHER
 #!/usr/bin/env bash
-# 既に専用プロファイルのインスタンスが動いていれば新規ウィンドウを開かず前面化する
 PID=\$(ps -axo pid=,command= | grep -F -- "--user-data-dir=$PROFILE_DIR" | grep -v Helper | grep -v grep | awk '{print \$1}' | head -1)
 if [[ -n "\$PID" ]]; then
   osascript -e "tell application \\"System Events\\" to set frontmost of (first process whose unix id is \$PID) to true" 2>/dev/null
@@ -76,8 +83,9 @@ exec "$CHROME" \\
   --user-data-dir="$PROFILE_DIR" \\
   --no-first-run --no-default-browser-check
 LAUNCHER
+fi
 chmod +x "$APP/Contents/MacOS/agd"
-cat > "$APP/Contents/Info.plist" <<'INFO'
+cat > "$APP/Contents/Info.plist" <<INFO
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -88,6 +96,9 @@ cat > "$APP/Contents/Info.plist" <<'INFO'
   <key>CFBundleVersion</key><string>1.0</string>
   <key>CFBundleExecutable</key><string>agd</string>
   <key>CFBundleIconFile</key><string>agd.icns</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>LSEnvironment</key>
+  <dict><key>AGD_PORT</key><string>${PORT}</string></dict>
   <key>LSUIElement</key><false/>
 </dict>
 </plist>
@@ -98,5 +109,5 @@ fi
 touch "$APP"
 # Spotlight / Finder から見つかるよう LaunchServices に登録
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true
-echo "✓ ${APP} 作成(専用プロファイル: $PROFILE_DIR)"
+echo "✓ ${APP} 作成"
 echo "  Spotlight や Dock から「agd」で起動できます"

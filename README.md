@@ -76,7 +76,7 @@ Press `?` in the dashboard for the full list. Highlights:
 bash scripts/install-macapp.sh
 ```
 
-This registers the server as a login item (launchd) and creates `~/Applications/agd.app` — a standalone dashboard window using a Chromium app-mode window with a **dedicated browser profile**, fully isolated from your normal browser (and from anything automating it). Set `AGD_PATH_STRIP` / `AGD_PORT` when running the script to bake them in.
+This registers the server as a login item (launchd) and creates `agd.app` — a **native WKWebView shell** (compiled on the spot with `swiftc`; falls back to a dedicated-profile Chromium app window if unavailable). The app is completely independent of your browser, so it never collides with browser automation, and clicking its Dock icon focuses the existing window. Set `AGD_PATH_STRIP` / `AGD_PORT` when running the script to bake them in. Note: in the native shell, use macOS notifications (the in-page browser-notification toggle is a no-op).
 
 ## Configuration
 

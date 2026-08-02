@@ -76,7 +76,7 @@ agd watch    # 自動更新表示
 bash scripts/install-macapp.sh
 ```
 
-サーバーを launchd でログイン時自動起動に登録し、`~/Applications/agd.app` を生成します。agd.app は **専用ブラウザプロファイル**の Chromium アプリモードウィンドウで、普段の Chrome(およびそれを操作するブラウザ自動化)とは完全に分離されています。`AGD_PATH_STRIP` / `AGD_PORT` はスクリプト実行時の環境変数で埋め込めます。
+サーバーを launchd でログイン時自動起動に登録し、`agd.app` を生成します。agd.app は **WKWebView のネイティブシェル**(その場で `swiftc` コンパイル。無い環境では専用プロファイルの Chromium アプリモードにフォールバック)で、ブラウザとは完全に独立 — ブラウザ自動化と干渉せず、Dock クリックは既存ウィンドウへのフォーカスになります。`AGD_PATH_STRIP` / `AGD_PORT` はスクリプト実行時の環境変数で埋め込めます。※ネイティブシェルでは通知は macOS 通知を使ってください(ページ内のブラウザ通知トグルは無効)。
 
 ## 設定
 
