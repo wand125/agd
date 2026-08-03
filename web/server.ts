@@ -1092,6 +1092,21 @@ async function poll() {
     loadCodexNames();
     const [cr, xr] = await Promise.all([claudeRunning(), codexRunning()]);
     const running = [...cr, ...xr];
+    // 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)、
+    // キーが衝突してカードが取り合いになりレイアウトが崩れるため、2つ目以降を pid で区別する。
+    // 最古のプロセスが元のキーを保持する(ピン・並び順・選択の永続キーを安定させるため)
+    {
+      const groups = new Map<string, Session[]>();
+      for (const s of running) {
+        const g = groups.get(s.key);
+        if (g) g.push(s); else groups.set(s.key, [s]);
+      }
+      for (const g of groups.values()) {
+        if (g.length < 2) continue;
+        g.sort((a, b) => (b.ageS - a.ageS) || ((a.pid ?? 0) - (b.pid ?? 0)));  // 最古を先頭に
+        for (let i = 1; i < g.length; i++) g[i].key = `${g[i].key}#${g[i].pid ?? i}`;
+      }
+    }
     const runningSids = new Set(running.map(s => s.sid));
     const recents = [...claudeRecent(runningSids), ...codexRecent(runningSids)]
       .filter(s => !runningSids.has(s.sid));
