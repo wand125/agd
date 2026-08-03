@@ -561,7 +561,12 @@ function openCmdline() {
   $("cmd-input").focus();
   $("cmd-input").dispatchEvent(new Event("input"));  // 内部コマンド一覧を最初から表示
 }
-function closeCmdline() { $("cmdline").style.display = "none"; $("cmd-input").blur(); hideHints(); }
+function closeCmdline() {
+  if ($("cmdline").style.display === "none") return;  // blur ハンドラとの再入防止
+  $("cmdline").style.display = "none";
+  $("cmd-input").blur();
+  hideHints();
+}
 $("cmd-input").oninput = () => {
   const v = $("cmd-input").value;
   if (v.startsWith("/")) { updateSlashHints($("cmd-input"), () => sessionOf(curSelKey())); return; }
@@ -575,10 +580,11 @@ $("cmd-input").oninput = () => {
 $("cmd-input").onkeydown = (e) => {
   e.stopPropagation();
   if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === "Escape") { closeCmdline(); return; }  // ヒント表示中でも一発で閉じる
   if (handleHintKeys(e, $("cmd-input"))) return;
   if (e.key === "Enter") { const c = $("cmd-input").value.trim(); closeCmdline(); runCommand(c); }
-  else if (e.key === "Escape") closeCmdline();
 };
+$("cmd-input").onblur = () => closeCmdline();  // 外側クリックでも閉じる
 function curSelKey() { return activeTab === "grid" ? kbdKey : listKey; }
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
 async function sendNamedKey(k, label) {
