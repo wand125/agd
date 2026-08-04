@@ -439,7 +439,7 @@ async function gitInfo(cwd: string): Promise<GitInfo | null> {
 
 // ---------------------------------------------------------------- 設定 + macOS 通知
 const CONFIG_PATH = join(HOME, ".cache", "agd", "config.json");
-let config: { macNotify: boolean } = { macNotify: false };
+let config: { macNotify: boolean; summarize?: boolean } = { macNotify: false, summarize: true };
 try { config = { ...config, ...JSON.parse(readFileSync(CONFIG_PATH, "utf8")) }; } catch {}
 async function saveConfig() { try { await Bun.write(CONFIG_PATH, JSON.stringify(config)); } catch {} }
 
@@ -1037,6 +1037,78 @@ function searchIndex(q: string): SearchHit[] {
   return hits.sort((a, b) => b.mtime - a.mtime);
 }
 
+// ---------------------------------------------------------------- LLM 1行要約
+// busy→idle/waiting の遷移をトリガーに、直近ログを claude -p (haiku) で1行要約する。
+// 前回要約+差分のみを入力するローリング方式で、(セッション, エントリ数) 単位で SQLite にキャッシュ。
+searchDb.run(`CREATE TABLE IF NOT EXISTS summaries (key TEXT PRIMARY KEY, entry_count INTEGER, text TEXT, updated_at INTEGER)`);
+type SummaryRec = { entryCount: number; text: string; updatedAt: number };
+const summaries = new Map<string, SummaryRec>();
+for (const r of searchDb.query(`SELECT key, entry_count, text, updated_at FROM summaries`).all() as any[])
+  summaries.set(r.key, { entryCount: r.entry_count, text: r.text, updatedAt: r.updated_at });
+
+const baseKey = (k: string) => k.split("#")[0];
+let summarizerAvailable: boolean | undefined;
+const sumQueue: { key: string; force: boolean }[] = [];
+const sumQueued = new Set<string>();
+const sumAttempted = new Map<string, number>();  // 失敗・スキップ後の再試行抑制
+let sumRunning = false;
+
+function enqueueSummary(key: string, force = false) {
+  const k = baseKey(key);
+  if (sumQueued.has(k)) return;
+  if (!force && Date.now() - (sumAttempted.get(k) ?? 0) < 10 * 60_000 && summaries.has(k)) return;
+  sumQueued.add(k);
+  sumQueue.push({ key: k, force });
+  void runSumQueue();
+}
+
+async function runSumQueue() {
+  if (sumRunning) return;
+  sumRunning = true;
+  try {
+    while (sumQueue.length) {
+      const job = sumQueue.shift()!;
+      sumQueued.delete(job.key);
+      try { await summarizeOne(job.key, job.force); } catch {}
+      await Bun.sleep(500);
+    }
+  } finally { sumRunning = false; }
+}
+
+async function summarizeOne(key: string, force: boolean) {
+  if (config.summarize === false) return;
+  if (summarizerAvailable === undefined)
+    summarizerAvailable = !!(await sh(["sh", "-c", "command -v claude"])).trim();
+  if (!summarizerAvailable) return;
+  sumAttempted.set(key, Date.now());
+  const [agent, sid] = key.split(":") as ["claude" | "codex", string];
+  const path = agent === "claude" ? findClaudeTranscript(sid) : rolloutById(sid)?.path;
+  if (!path) return;
+  const entries = readTranscript(path, agent);
+  if (!entries.length) return;
+  const prev = summaries.get(key);
+  const from = prev ? prev.entryCount : Math.max(0, entries.length - 40);
+  const fresh = entries.slice(from).slice(-40);
+  if (!force && prev && fresh.length < 3) return;  // 目立った進展なし
+  const body = fresh.map(e => {
+    const label = e.role === "tool_use" ? `tool:${e.title}` : e.role;
+    return `[${label}] ${e.text.slice(0, 400)}`;
+  }).join("\n").slice(0, 12_000);
+  const prompt = `あなたはAIコーディングエージェントのセッション監視ダッシュボードの要約器です。
+前回までの要約: ${prev?.text ?? "(なし)"}
+--- 新しいログ(抜粋) ---
+${body}
+---
+現在の状況を日本語1行(60字以内)で要約してください。何の作業をしていて、直近の結果・エラー・確認待ち事項があれば含めること。出力は要約文のみ。`;
+  const out = (await sh(["claude", "-p", "--model", "haiku", "--no-session-persistence"], prompt)).trim();
+  if (!out || out.length > 200) return;
+  const rec = { entryCount: entries.length, text: out.split("\n")[0], updatedAt: Date.now() };
+  summaries.set(key, rec);
+  searchDb.run(`INSERT INTO summaries(key, entry_count, text, updated_at) VALUES(?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET entry_count = excluded.entry_count, text = excluded.text, updated_at = excluded.updated_at`,
+    [key, rec.entryCount, rec.text, rec.updatedAt]);
+}
+
 // ---------------------------------------------------------------- 新規セッション起動
 async function openNew(agent: string, cwd: string): Promise<string> {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -1129,7 +1201,7 @@ async function poll() {
     const order: Record<string, number> = { waiting: 0, busy: 1, idle: 2, resumable: 3 };
     const sessions = [...running, ...recents]
       .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.ageS - b.ageS)
-      .map(s => ({ ...s, screen: screens.get(s.tty) }));
+      .map(s => ({ ...s, screen: screens.get(s.tty), summary: summaries.get(baseKey(s.key))?.text }));
     lastSnapshot = { sessions, at: Date.now() };
     // 状態変化検知 → 通知イベント
     const changes: { key: string; name: string; agent: string; from: string; to: string; tty: string }[] = [];
@@ -1137,6 +1209,13 @@ async function poll() {
       const prev = prevStatus.get(s.key);
       if (prev && prev !== s.status) changes.push({ key: s.key, name: s.name, agent: s.agent, from: prev, to: s.status, tty: s.tty });
       prevStatus.set(s.key, s.status);
+    }
+    // 要約トリガー: busy → idle/waiting の遷移時 + 要約未作成の実行中セッション
+    if (config.summarize !== false) {
+      for (const c of changes)
+        if (c.from === "busy" && (c.to === "waiting" || c.to === "idle")) enqueueSummary(c.key);
+      for (const s of running)
+        if (!summaries.has(baseKey(s.key))) enqueueSummary(s.key);
     }
     // macOS 通知(busy→waiting/idle)
     if (config.macNotify) {
@@ -1207,6 +1286,7 @@ try {
       if (req.method === "POST") {
         const body = await req.json();
         if (typeof body.macNotify === "boolean") config.macNotify = body.macNotify;
+        if (typeof body.summarize === "boolean") config.summarize = body.summarize;
         await saveConfig();
       }
       // AGD_PATH_STRIP: 表示上「…」に短縮する共通パスプレフィックス(例: ~/projects)
@@ -1291,6 +1371,12 @@ try {
       if (!tty || !text) return Response.json({ error: "tty and text required" }, { status: 400 });
       const r = await sendToTty(tty, text);
       return Response.json({ result: r });
+    }
+    if (req.method === "POST" && url.pathname === "/api/summarize") {
+      const { key } = await req.json();
+      if (!key) return Response.json({ error: "key required" }, { status: 400 });
+      enqueueSummary(String(key), true);
+      return Response.json({ result: "queued" });
     }
     if (req.method === "POST" && url.pathname === "/api/close") {
       const { tty } = await req.json();

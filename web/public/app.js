@@ -376,6 +376,10 @@ function renderGrid() {
     el.querySelector(".card-meta").textContent = fmtAge(s.ageS);
     el.querySelector(".git-badge").innerHTML = gitBadge(s.git);
     el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.key));
+    const sum = el.querySelector(".card-summary");
+    sum.textContent = maskText(s.summary ?? "");
+    sum.title = maskText(s.summary ?? "");
+    sum.style.display = s.summary ? "" : "none";
     renderPromptBar(el.querySelector(".prompt-bar"), s);
     const scr = el.querySelector(".screen");
     if (setScreen(scr, s.screen ?? "(画面を取得できません)")) {
@@ -404,6 +408,7 @@ function buildCard(key) {
       <button class="jump-btn detail-btn" title="詳細ログを開く">⤢</button>
       <button class="jump-btn go-btn" title="ターミナルへジャンプ">⌖</button>
     </div>
+    <div class="card-summary" style="display:none"></div>
     <div class="prompt-bar" style="display:none"></div>
     <div class="screen-wrap">
       <div class="screen"></div>
@@ -476,6 +481,7 @@ const INTERNAL_CMDS = [
   { cmd: "mode", desc: "選択セッションに ⇧Tab(モード切替)を送信" },
   { cmd: "key ", desc: "任意キー送信 (Up/Down/Left/Right/Tab/ShiftTab/Enter/Escape)" },
   { cmd: "mask", desc: "マスクモード切替(スクリーンショット用に内容をスクランブル)" },
+  { cmd: "sum", desc: "選択セッションの1行要約を今すぐ更新" },
   { cmd: "/", desc: "スラッシュコマンドを選択セッションへ送信" },
 ];
 const slashCache = new Map(); // "agent|cwd" → [{cmd, desc}]
@@ -633,6 +639,10 @@ async function runCommand(c) {
     openNew();
   } else if (c === "mask") {
     toggleMask();
+  } else if (c === "sum") {
+    const key = curSelKey();
+    if (!key) { toast(":sum — セッションが選択されていません"); return; }
+    api("/api/summarize", { key }).then(() => toast("要約を実行中…(数秒後に反映)"));
   } else if (c.startsWith("/")) {
     // スラッシュコマンドを選択セッションへそのまま送信(:/clear など)
     sendTextToSelected(c);
@@ -673,6 +683,12 @@ function buildRow(s, running) {
   row.querySelector(".dot").style.background = `var(--${s.status})`;
   row.querySelector(".card-title").textContent = maskText(s.name);
   row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${s.status} · ${fmtAge(s.ageS)}`;
+  if (s.summary) {
+    const sum = document.createElement("div");
+    sum.className = "row-summary";
+    sum.textContent = maskText(s.summary);
+    row.appendChild(sum);
+  }
   const btns = document.createElement("span");
   if (running) {
     btns.innerHTML = `<button class="btn">ログ</button> <button class="btn">⌖</button>`;

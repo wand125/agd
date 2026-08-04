@@ -15,6 +15,7 @@ agd discovers **existing sessions** — including ones you started in plain iTer
 - **Send prompts from the browser** — per-card input with slash-command hints (Claude/Codex aware, custom commands included), Shift+Enter for multiline
 - **Full transcripts** — conversation logs with collapsible thinking/tool-call entries, diff rendering for edits, subagent logs, incremental loading, cross-session search
 - **Vim everywhere** — `hjkl` to move between session cards, `i` to type, `:q` to kill a session, `?` for the full keymap
+- **AI one-line summaries** — each session gets an LLM-generated status line ("what is it doing / waiting for"), refreshed when work finishes or input is needed (runs via headless `claude -p` on haiku; rolling incremental prompts keep cost negligible; `:sum` to refresh manually)
 - **Notifications** — browser and/or macOS notifications when a session needs input or finishes
 - **Session lifecycle** — spawn new sessions (`n` palette with directory completion), duplicate (`Ctrl+N`), continue a conversation in a fresh session (`Ctrl+C`), resume past sessions, close (`:q`)
 
