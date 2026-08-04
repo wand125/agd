@@ -1017,6 +1017,7 @@ function toggleDetailEntry(forceOpen) {
   el.scrollIntoView({ block: "nearest" });
 }
 async function openDetail(key) {
+  clearInterval(logTimer);  // 前セッションの更新タイマーを先に止める(切替時の上書き防止)
   detailKey = key;
   const s = sessionOf(key);
   if (!s) return;
@@ -1127,10 +1128,13 @@ $("d-sub").onchange = async () => {
   const s = sessionOf(detailKey);
   if (s) await loadLog(s, true);
 };
+let logSeq = 0;  // 読み込み世代。古い応答が新しい表示を上書きするレースを防ぐ
 async function loadLog(s, force) {
+  const seq = ++logSeq;
   const data = force
     ? await fetchTranscript(s)                          // 末尾300件
     : await fetchTranscript(s, { from: logStart });     // 読み込み済み範囲以降を更新
+  if (seq !== logSeq) return;  // この取得中に別セッション/サブへ切り替わった → 破棄
   if (!force && data.entries.length === logEntries.length && data.total === logTotal) return;
   if (force) logStart = data.start;
   logEntries = data.entries;
@@ -1143,7 +1147,9 @@ async function loadOlder() {
   if (!s || logStart <= 0) return;
   const log = $("detail-log");
   const prevHeight = log.scrollHeight;
+  const seq = ++logSeq;
   const data = await fetchTranscript(s, { before: logStart });
+  if (seq !== logSeq) return;
   const added = data.entries.length;
   logEntries = [...data.entries, ...logEntries];
   logStart = data.start;
