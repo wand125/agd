@@ -678,18 +678,17 @@ function buildRow(s, running) {
     <span class="agent-tag">${s.agent}</span>
     <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
     <span class="card-title"></span>
+    <span class="row-summary"></span>
     <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
     <span class="card-meta"></span>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
   row.querySelector(".card-title").textContent = maskText(s.name);
+  const sum = row.querySelector(".row-summary");
+  sum.textContent = s.summary ? maskText(s.summary) : "";
+  sum.title = s.summary ? maskText(s.summary) : "";
   row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${s.status} · ${fmtAge(s.ageS)}`;
-  if (s.summary) {
-    const sum = document.createElement("div");
-    sum.className = "row-summary";
-    sum.textContent = maskText(s.summary);
-    row.appendChild(sum);
-  }
   const btns = document.createElement("span");
+  btns.className = "row-btns";
   if (running) {
     btns.innerHTML = `<button class="btn">ログ</button> <button class="btn">⌖</button>`;
     const [logBtn, jumpBtn] = btns.querySelectorAll("button");
