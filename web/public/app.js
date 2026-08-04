@@ -596,7 +596,11 @@ $("cmd-input").onkeydown = (e) => {
   if (e.key === "Enter") { const c = $("cmd-input").value.trim(); closeCmdline(); runCommand(c); }
 };
 $("cmd-input").onblur = () => closeCmdline();  // 外側クリックでも閉じる
-function curSelKey() { return activeTab === "grid" ? kbdKey : listKey; }
+function curSelKey() {
+  // 詳細ポップアップ表示中はそのセッションをコマンドの対象にする
+  if ($("overlay").classList.contains("show") && detailKey) return detailKey;
+  return activeTab === "grid" ? kbdKey : listKey;
+}
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
 async function sendNamedKey(k, label) {
   const s = sessionOf(curSelKey());
@@ -615,14 +619,19 @@ async function sendTextToSelected(text) {
 }
 async function runCommand(c) {
   if (c === "q") {
-    const s = sessionOf(curSelKey());
+    const selKey = curSelKey();
+    const s = sessionOf(selKey);
     if (!s) { toast(":q — セッションが選択されていません"); return; }
+    const viewing = detailKey === selKey && $("overlay").classList.contains("show");
     if (s.running) {
       if (!s.tty) { toast("tty不明のため終了できません"); return; }
       closing.add(s.key);
       render();
       const r = await api("/api/close", { tty: s.tty });
-      if ((r.result || "").startsWith("ok")) toast(`✕ ${s.name} を終了しました`);
+      if ((r.result || "").startsWith("ok")) {
+        toast(`✕ ${s.name} を終了しました`);
+        if (viewing) closeDetail();  // 表示中のセッションを終了したらポップアップも閉じる
+      }
       else { closing.delete(s.key); render(); toast("終了失敗: " + r.result); }
     } else {
       archived.add(s.key);
@@ -867,6 +876,9 @@ document.addEventListener("keydown", (e) => {
     else if (/^[1-9]$/.test(e.key) && detailKey) answerPromptByNumber(detailKey, Number(e.key));
     else if (e.key === "i") { e.preventDefault(); $("d-input").focus(); }
     else if (e.key === "f" && detailKey) jump(detailKey);
+    else if (e.key === "s" && detailKey) sendNamedKey("Escape", "Esc(中断)");
+    else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
+    else if (e.key === ":") { e.preventDefault(); openCmdline(); }
     else if (e.key === "Escape" || e.key === "q") closeDetail();
     return;
   }
@@ -1212,7 +1224,7 @@ $("d-input").onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDetail(); }  // ⇧⏎ は改行
   if (e.key === "Escape") $("d-input").blur();  // スクロールモードへ(閉じるのは q/Esc)
 };
-const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>g/G</kbd>端 <kbd>⏎</kbd>開閉 <kbd>h/l</kbd>閉/開 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>q</kbd>閉じる";
+const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>⏎</kbd>開閉 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>s</kbd>中断 <kbd>:</kbd>cmd <kbd>q</kbd>閉じる";
 const D_HINT_INSERT = "<kbd>⏎</kbd>送信 <kbd>⇧⏎</kbd>改行 <kbd>Esc</kbd>スクロールモードへ";
 $("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = D_HINT_INSERT; };
 $("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = D_HINT_SCROLL; };
