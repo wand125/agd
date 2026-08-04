@@ -67,7 +67,7 @@ Press `?` in the dashboard for the full list. Highlights:
 | `o` / `f` | open transcript view / focus the real terminal |
 | `m` / `s` | send Shift+Tab (permission mode cycle) / Esc (interrupt) |
 | `n` / `Ctrl+N` / `Ctrl+C` | new session palette / duplicate / continue conversation |
-| `p`, `⇧H`/`⇧L` | pin session / reorder cards |
+| `p`, `⇧HJKL` | pin session / reorder cards (swap left/down/up/right) |
 | `t` / `/` / `:` | switch tab / filter & search logs / command line (`:q`, `:/clear`, …) |
 
 ## Desktop app (macOS)

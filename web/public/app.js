@@ -36,27 +36,28 @@ function togglePin(key) {
   followSelection();
   render();
 }
-// カードを見た目の順序で左右に移動(dir: -1=前へ, +1=後ろへ)
-// 同一プロジェクトの隣 → 表示順(cardOrder)を入れ替え / プロジェクト境界 → ピン順を入れ替え
-function moveCard(key, dir) {
+// カードを見た目の順序で移動(delta: ±1=左右, ±列数=上下)。対象位置のカードと入れ替える
+function moveCard(key, delta) {
   const list = orderedFiltered();
   const idx = list.findIndex(s => s.key === key);
   if (idx < 0) { toast("カードが選択されていません"); return; }
-  const cur = list[idx], nb = list[idx + dir];
-  if (!nb) { toast(dir < 0 ? "すでに先頭です" : "すでに末尾です"); return; }
+  const vertical = Math.abs(delta) > 1;
+  const dirLabel = vertical ? (delta < 0 ? "上" : "下") : (delta < 0 ? "前" : "後ろ");
+  const cur = list[idx], nb = list[idx + delta];
+  if (!nb) { toast(delta < 0 ? "すでに先頭側です" : "すでに末尾側です"); return; }
   const curPinned = pinned.includes(cur.key), nbPinned = pinned.includes(nb.key);
   if (curPinned && nbPinned) {
     // ピン同士 → ピン順を入れ替え
     const i = pinned.indexOf(cur.key), j = pinned.indexOf(nb.key);
     [pinned[i], pinned[j]] = [pinned[j], pinned[i]];
     savePinned();
-    toast(`📌 ${dir < 0 ? "前" : "後ろ"}へ`);
+    toast(`📌 ${dirLabel}へ`);
   } else if (curPinned !== nbPinned) {
     toast("📌 ピン領域の境界です(p でピン状態を揃えると跨げます)");
   } else {
     const a = cardOrder.indexOf(cur.key), b = cardOrder.indexOf(nb.key);
     if (a >= 0 && b >= 0) { [cardOrder[a], cardOrder[b]] = [cardOrder[b], cardOrder[a]]; saveCardOrder(); }
-    toast(`↔ カードを${dir < 0 ? "前" : "後ろ"}へ`);
+    toast(`↔ カードを${dirLabel}へ`);
   }
   followSelection();
   render();
@@ -395,8 +396,10 @@ function buildCard(key) {
       <span class="dot"></span><span class="agent-tag"></span><span class="proj-tag"></span>
       <span class="card-title"></span>
       <span class="git-badge"></span><span class="card-meta"></span>
-      <button class="jump-btn pin-move pin-left" title="ピン順を前へ (⇧H)">◀</button>
-      <button class="jump-btn pin-move pin-right" title="ピン順を後ろへ (⇧L)">▶</button>
+      <button class="jump-btn pin-move pin-left" title="カードを前へ (⇧H)">◀</button>
+      <button class="jump-btn pin-move pin-up" title="カードを上へ (⇧K)">▲</button>
+      <button class="jump-btn pin-move pin-down" title="カードを下へ (⇧J)">▼</button>
+      <button class="jump-btn pin-move pin-right" title="カードを後ろへ (⇧L)">▶</button>
       <button class="jump-btn pin-btn" title="ピン留め(このセッションを先頭に固定)">📌</button>
       <button class="jump-btn detail-btn" title="詳細ログを開く">⤢</button>
       <button class="jump-btn go-btn" title="ターミナルへジャンプ">⌖</button>
@@ -410,6 +413,8 @@ function buildCard(key) {
   el.querySelector(".pin-btn").onclick = (e) => { e.stopPropagation(); togglePin(el.dataset.key); };
   el.querySelector(".pin-left").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, -1); };
   el.querySelector(".pin-right").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, 1); };
+  el.querySelector(".pin-up").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, -gridCols); };
+  el.querySelector(".pin-down").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, gridCols); };
   el.querySelector(".detail-btn").onclick = (e) => { e.stopPropagation(); openDetail(el.dataset.key); };
   el.querySelector(".go-btn").onclick = (e) => { e.stopPropagation(); jump(el.dataset.key); };
   el.querySelector(".proj-tag").onclick = (e) => { e.stopPropagation(); $("search").value = projName(sessionOf(el.dataset.key)?.cwd ?? ""); page = 0; render(); };
@@ -921,10 +926,11 @@ document.addEventListener("keydown", (e) => {
     }
   };
   const sel = curIdx >= 0 ? cards[curIdx] : null;
-  const shiftH = e.shiftKey && e.key.toLowerCase() === "h";
-  const shiftL = e.shiftKey && e.key.toLowerCase() === "l";
-  if (shiftH && kbdKey) moveCard(kbdKey, -1);
-  else if (shiftL && kbdKey) moveCard(kbdKey, 1);
+  const shiftKeyOf = (c) => e.shiftKey && e.key.toLowerCase() === c;
+  if (shiftKeyOf("h") && kbdKey) moveCard(kbdKey, -1);
+  else if (shiftKeyOf("l") && kbdKey) moveCard(kbdKey, 1);
+  else if (shiftKeyOf("k") && kbdKey) moveCard(kbdKey, -gridCols);
+  else if (shiftKeyOf("j") && kbdKey) moveCard(kbdKey, gridCols);
   else if (e.key === "h" || e.key === "ArrowLeft") move(-1, 0);
   else if (e.key === "l" || e.key === "ArrowRight") move(1, 0);
   else if (e.key === "j" || e.key === "ArrowDown") move(0, 1);
