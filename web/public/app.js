@@ -726,7 +726,7 @@ function gitBadge(g) {
 // ---------------- 選択プロンプト応答 ----------------
 function renderPromptBar(bar, s) {
   if (s.status !== "waiting" || !s.tty) { bar.style.display = "none"; return; }
-  bar.style.display = "";
+  bar.style.display = "flex";  // #d-prompt は CSS で display:none のため、インラインで明示的に上書きする
   const p = s.prompt;
   const opts = p?.options ?? [];
   let html = "";
