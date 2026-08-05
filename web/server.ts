@@ -1204,7 +1204,10 @@ try {
     }
     if (req.method === "POST" && url.pathname === "/api/resume") {
       const { agent, sid, cwd, fork } = await req.json();
-      const r = await openResume(agent, sid, cwd, !!fork);
+      // 実行中セッションの複製はクライアント指定に関わらず必ず fork する
+      // (素の resume だと同一トランスクリプトに追記されログが交錯するため)
+      const isRunning = lastSnapshot.sessions.some(s => s.running && s.sid === sid);
+      const r = await openResume(agent, sid, cwd, !!fork || isRunning);
       return Response.json({ result: r });
     }
     return new Response("not found", { status: 404 });
