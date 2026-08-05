@@ -1155,6 +1155,7 @@ function customCommands(agent: string, cwd: string): [string, string][] {
 // ---------------------------------------------------------------- ポーリング + WebSocket
 type Snapshot = { sessions: (Session & { screen?: string })[]; at: number };
 let lastSnapshot: Snapshot = { sessions: [], at: 0 };
+const keyAssign = new Map<string, string>();  // "agent:sid:pid" → 確定済みカードキー
 const prevStatus = new Map<string, string>();
 const wsClients = new Set<any>();
 
@@ -1164,19 +1165,36 @@ async function poll() {
     loadCodexNames();
     const [cr, xr] = await Promise.all([claudeRunning(), codexRunning()]);
     const running = [...cr, ...xr];
-    // 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)、
-    // キーが衝突してカードが取り合いになりレイアウトが崩れるため、2つ目以降を pid で区別する。
-    // 最古のプロセスが元のキーを保持する(ピン・並び順・選択の永続キーを安定させるため)
+    // 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)のキー衝突対策。
+    // 重要: 一度プロセス(pid)に割り当てたキーは、そのプロセスが生きている限り変えない。
+    // (元プロセス終了時に新プロセスのキーが SID#PID → SID に変わると、カードの同一性が
+    //  飛んで位置・選択・表示が入れ替わったように見えるため)
     {
+      const live = new Set(running.map(s => `${s.agent}:${s.sid}:${s.pid}`));
+      for (const k of keyAssign.keys()) if (!live.has(k)) keyAssign.delete(k);
       const groups = new Map<string, Session[]>();
       for (const s of running) {
         const g = groups.get(s.key);
         if (g) g.push(s); else groups.set(s.key, [s]);
       }
       for (const g of groups.values()) {
-        if (g.length < 2) continue;
-        g.sort((a, b) => (b.ageS - a.ageS) || ((a.pid ?? 0) - (b.pid ?? 0)));  // 最古を先頭に
-        for (let i = 1; i < g.length; i++) g[i].key = `${g[i].key}#${g[i].pid ?? i}`;
+        const used = new Set<string>();
+        // 既に割当済みのプロセスはそのキーを維持
+        for (const s of g) {
+          const id = `${s.agent}:${s.sid}:${s.pid}`;
+          const prior = keyAssign.get(id);
+          if (prior) { s.key = prior; used.add(prior); }
+        }
+        // 未割当は「最古がベースキー(空いていれば)、それ以外は #pid」
+        const unassigned = g.filter(s => !keyAssign.has(`${s.agent}:${s.sid}:${s.pid}`))
+          .sort((a, b) => (b.ageS - a.ageS) || ((a.pid ?? 0) - (b.pid ?? 0)));
+        for (const s of unassigned) {
+          const base = s.key;
+          const assigned = used.has(base) ? `${base}#${s.pid ?? 0}` : base;
+          s.key = assigned;
+          used.add(assigned);
+          keyAssign.set(`${s.agent}:${s.sid}:${s.pid}`, assigned);
+        }
       }
     }
     const runningSids = new Set(running.map(s => s.sid));
