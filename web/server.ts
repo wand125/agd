@@ -104,6 +104,38 @@ function loadCodexNames() {
   } catch {}
 }
 
+// session_index に名前が無い codex セッション用: rollout の最初のユーザーメッセージから名前を作る
+const codexAutoNames = new Map<string, string>();
+function codexNameFor(sid: string, path?: string): string {
+  const named = codexNames.get(sid);
+  if (named) return named;
+  const cached = codexAutoNames.get(sid);
+  if (cached) return cached;
+  const p = path ?? rolloutById(sid)?.path;
+  if (!p) return sid;
+  try {
+    const fd = openSync(p, "r");
+    const buf = Buffer.alloc(262_144);
+    const n = readSync(fd, buf, 0, 262_144, 0);
+    closeSync(fd);
+    for (const line of buf.toString("utf8", 0, n).split("\n").slice(0, 80)) {
+      let o: any; try { o = JSON.parse(line); } catch { continue; }
+      const pl = o?.payload;
+      if (o?.type === "response_item" && pl?.type === "message" && pl.role === "user") {
+        const t = (typeof pl.content === "string" ? pl.content
+          : Array.isArray(pl.content) ? pl.content.map((x: any) => x.text ?? "").join(" ") : "").trim();
+        if (t && !t.startsWith("<")) {  // <environment_context> や <recommended_plugins> 等のシステム注入は除外
+          const name = t.replace(/\s+/g, " ").slice(0, 50);
+          codexAutoNames.set(sid, name);
+          return name;
+        }
+      }
+    }
+  } catch {}
+  codexAutoNames.set(sid, sid);  // 見つからなくても再走査しない
+  return sid;
+}
+
 // ---------------------------------------------------------------- セッション収集
 export type PromptInfo = {
   question?: string;
@@ -189,7 +221,7 @@ async function codexRunning(): Promise<Session[]> {
       key: `codex:${meta?.id ?? `pid${p.pid}`}`,
       agent: "codex" as const,
       sid: meta?.id ?? "",
-      name: (meta && codexNames.get(meta.id)) || meta?.id || `pid ${p.pid}`,
+      name: meta ? codexNameFor(meta.id, meta.path) : `pid ${p.pid}`,
       cwd,
       status: meta && now - meta.mtime < BUSY_WINDOW_S ? "busy" : "idle",
       running: true,
@@ -260,7 +292,7 @@ function codexRecent(excludeSids: Set<string>): Session[] {
   const now = Date.now() / 1000;
   return metas.map(m => ({
     key: `codex:${m.id}`, agent: "codex" as const, sid: m.id,
-    name: codexNames.get(m.id) || m.id, cwd: m.cwd,
+    name: codexNameFor(m.id, m.path), cwd: m.cwd,
     status: "resumable", running: false, tty: "",
     ageS: Math.max(0, Math.floor(now - m.mtime)),
   }));
@@ -487,6 +519,7 @@ async function macNotify(title: string, body: string, tty: string) {
   } else {
     await osascript(`display notification "${body.replace(/"/g, "'")}" with title "${title.replace(/"/g, "'")}"`);
   }
+  console.log(`macos notify: ${title}`);
 }
 
 // ---------------------------------------------------------------- 入力送信 / フォーカス / resume
@@ -810,7 +843,7 @@ async function searchLogs(q: string): Promise<SearchHit[]> {
       } catch {}
       name = claudeNameFor(f.sid, f.path);
     } else {
-      name = codexNames.get(f.sid) || f.sid;
+      name = codexNameFor(f.sid, f.path);
     }
     hits.push({ agent: f.agent, sid: f.sid, name, cwd, mtime: f.mtime, count, snippet });
   }));
@@ -898,7 +931,7 @@ function enrichHits(raw: { path: string; agent: string; sid: string; mtime: numb
       name = claudeNameFor(h.sid, h.path);
     } else {
       cwd = rolloutById(h.sid)?.cwd ?? "";
-      name = codexNames.get(h.sid) || h.sid;
+      name = codexNameFor(h.sid, h.path);
     }
     return { agent: h.agent, sid: h.sid, name, cwd, mtime: h.mtime, count: h.count, snippet: h.snippet };
   });
@@ -995,6 +1028,14 @@ async function poll() {
     const runningSids = new Set(running.map(s => s.sid));
     const recents = [...claudeRecent(runningSids), ...codexRecent(runningSids)]
       .filter(s => !runningSids.has(s.sid));
+    // 長時間ログ更新の無い claude の busy はゾンビ表示とみなして idle に補正(#4)。
+    // 長いツール実行中(書き込みなし)の誤判定を避けるため閾値は10分と長めに取る
+    for (const s of running) {
+      if (s.agent !== "claude" || s.status !== "busy") continue;
+      const p = findClaudeTranscript(s.sid);
+      if (!p) continue;
+      try { if (Date.now() - statSync(p).mtimeMs > 10 * 60_000) s.status = "idle"; } catch {}
+    }
     const screens = await captureScreens(running.map(s => s.tty));
     // 画面から選択プロンプトを検出。codex はこれで waiting 判定も行う
     for (const s of running) {
