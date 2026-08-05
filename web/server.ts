@@ -692,11 +692,14 @@ on run argv
   end tell
 end run`;
 
-async function openResume(agent: string, sid: string, cwd: string): Promise<string> {
+// fork=true: 会話履歴を引き継ぎつつ新しいセッションIDに分岐する。
+// 素の resume で複製すると両プロセスが同一トランスクリプトに追記してログが交錯するため、
+// 実行中セッションの複製(Ctrl+C)は必ず fork を使う
+async function openResume(agent: string, sid: string, cwd: string, fork = false): Promise<string> {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   const cmd = agent === "claude"
-    ? `cd ${q(cwd)} && claude --resume ${sid}`
-    : `cd ${q(cwd)} && codex resume ${sid}`;
+    ? `cd ${q(cwd)} && claude --resume ${sid}${fork ? " --fork-session" : ""}`
+    : `cd ${q(cwd)} && codex ${fork ? "fork" : "resume"} ${sid}`;
   await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT);
   return "ok";
 }
@@ -1200,8 +1203,8 @@ try {
       return Response.json({ result: r });
     }
     if (req.method === "POST" && url.pathname === "/api/resume") {
-      const { agent, sid, cwd } = await req.json();
-      const r = await openResume(agent, sid, cwd);
+      const { agent, sid, cwd, fork } = await req.json();
+      const r = await openResume(agent, sid, cwd, !!fork);
       return Response.json({ result: r });
     }
     return new Response("not found", { status: 404 });

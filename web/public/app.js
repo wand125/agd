@@ -1372,7 +1372,8 @@ function duplicateSession(key) {
 async function resumeContinue(key) {
   const s = sessionOf(key);
   if (!s?.sid || !s?.cwd) { toast("引き継げるセッションがありません"); return; }
-  await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
+  // fork: 新しいセッションIDに分岐(素のresumeだと両プロセスが同一ログに追記して交錯する)
+  await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
   pendingSelect = {
     agent: s.agent, cwd: s.cwd,
     keys: new Set(sessions.filter(x => x.running).map(x => x.key)),
