@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""agd iTerm2 キャプチャヘルパー。
+"""agd iTerm2 ヘルパー。
 
-iTerm2 Python API で全セッションの画面をセル単位のスタイル付きで取得し、
-ANSI エスケープに変換して JSON lines で stdout に流す常駐プロセス。
-agd サーバー(Bun)が子プロセスとして起動する。
+役割1(画面取得): 全セッションの画面をセル単位スタイル付きで取得し、
+ANSI に変換して JSON lines で stdout に流す(2秒周期)。
+役割2(操作): stdin から JSON lines でコマンドを受け、iTerm2 Python API で実行する。
+  {"id": 1, "op": "focus"|"send"|"key"|"close", "tty": "ttys012", ...}
+osascript(Apple Events)と違い常駐接続なので ms 級で応答し、キュー渋滞も起きない。
 
 出力形式:
   {"type": "status", "ok": true/false, "error": "..."}
   {"type": "screens", "screens": {"ttys012": "<ANSI付きテキスト>", ...}}
+  {"type": "op", "id": 1, "ok": true/false, "error": "..."}
 """
 import asyncio
 import json
@@ -17,9 +20,19 @@ import iterm2
 
 POLL_SEC = 2.0
 
+KEYMAP = {
+    "Enter": "\r",
+    "Escape": "\x1b",
+    "Up": "\x1b[A",
+    "Down": "\x1b[B",
+    "Right": "\x1b[C",
+    "Left": "\x1b[D",
+    "Tab": "\t",
+    "ShiftTab": "\x1b[Z",
+}
+
 
 def sgr_for(style) -> list:
-    """CellStyle → SGR コード列"""
     codes = []
     if style.bold:
         codes.append("1")
@@ -43,18 +56,13 @@ def sgr_for(style) -> list:
 
 
 def line_to_ansi(lp) -> str:
-    """LineContents proto → ANSI 付きテキスト。
-
-    スタイルはセル単位のラン(repeats)で来るため、code_points_per_cell で
-    セル数→文字数の対応を取る(全角文字は2セル1文字などのずれを吸収)。
-    """
     text = lp.text.replace("\x00", " ")  # 画像等のプレースホルダセルを空白に
     counts = []
     for run in lp.code_points_per_cell:
         counts.extend([run.num_code_points] * run.repeats)
     out = []
-    ci = 0    # 文字インデックス
-    cell = 0  # セルインデックス
+    ci = 0
+    cell = 0
     for st in lp.style:
         n_cells = st.repeats if st.repeats else 1
         n_chars = sum(counts[cell:cell + n_cells]) if counts else n_cells
@@ -67,6 +75,50 @@ def line_to_ansi(lp) -> str:
     if ci < len(text):
         out.append(text[ci:])
     return "".join(out)
+
+
+async def find_session(app, tty: str):
+    target = "/dev/" + tty
+    for w in app.terminal_windows:
+        for t in w.tabs:
+            for s in t.sessions:
+                try:
+                    if await s.async_get_variable("tty") == target:
+                        return s
+                except Exception:
+                    continue
+    return None
+
+
+async def handle_op(app, msg) -> dict:
+    op = msg.get("op")
+    oid = msg.get("id")
+    try:
+        await app.async_refresh()
+        session = await find_session(app, msg.get("tty", ""))
+        if session is None:
+            return {"type": "op", "id": oid, "ok": False, "error": "session not found"}
+        if op == "focus":
+            await session.async_activate(select_tab=True, order_window_front=True)
+            await app.async_activate()
+        elif op == "send":
+            text = msg.get("text", "")
+            # 複数行はブラケットペーストで包む。テキストと Enter は分離して送る
+            payload = f"\x1b[200~{text}\x1b[201~" if "\n" in text else text
+            await session.async_send_text(payload)
+            await asyncio.sleep(0.15)
+            await session.async_send_text("\r")
+        elif op == "key":
+            for k in msg.get("keys", []):
+                await session.async_send_text(KEYMAP.get(k, k))
+                await asyncio.sleep(0.12)
+        elif op == "close":
+            await session.async_close(force=True)
+        else:
+            return {"type": "op", "id": oid, "ok": False, "error": f"unknown op: {op}"}
+        return {"type": "op", "id": oid, "ok": True}
+    except Exception as e:
+        return {"type": "op", "id": oid, "ok": False, "error": str(e)}
 
 
 async def capture_all(app) -> dict:
@@ -87,17 +139,38 @@ async def capture_all(app) -> dict:
     return screens
 
 
-async def main(connection):
-    app = await iterm2.async_get_app(connection)
-    print(json.dumps({"type": "status", "ok": True}), flush=True)
+async def stdin_loop(app):
+    loop = asyncio.get_event_loop()
+    reader = asyncio.StreamReader()
+    protocol = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+    while True:
+        line = await reader.readline()
+        if not line:
+            break
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        result = await handle_op(app, msg)
+        print(json.dumps(result), flush=True)
+
+
+async def capture_loop(app):
     while True:
         try:
             await app.async_refresh()
             screens = await capture_all(app)
             print(json.dumps({"type": "screens", "screens": screens}), flush=True)
-        except Exception as e:  # 接続断はここで拾って親に伝える
+        except Exception as e:
             print(json.dumps({"type": "status", "ok": False, "error": str(e)}), flush=True)
         await asyncio.sleep(POLL_SEC)
+
+
+async def main(connection):
+    app = await iterm2.async_get_app(connection)
+    print(json.dumps({"type": "status", "ok": True}), flush=True)
+    await asyncio.gather(capture_loop(app), stdin_loop(app))
 
 
 if __name__ == "__main__":
