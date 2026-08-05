@@ -127,10 +127,14 @@ export type Session = {
   git?: GitInfo;
 };
 
+let lastClaudeRunning: { at: number; list: Session[] } = { at: 0, list: [] };
 async function claudeRunning(): Promise<Session[]> {
   const out = await sh(["claude", "agents", "--json"]);
   let arr: any[] = [];
-  try { arr = JSON.parse(out); } catch { return []; }
+  try { arr = JSON.parse(out); } catch {
+    // 一時的な失敗でカードが全消えしないよう、60秒以内の前回結果を返す
+    return Date.now() - lastClaudeRunning.at < 60_000 ? lastClaudeRunning.list : [];
+  }
   if (!arr.length) return [];
   const pids = arr.map(a => a.pid).join(",");
   const psOut = await sh(["ps", "-o", "pid=,tty=", "-p", pids]);
@@ -139,7 +143,7 @@ async function claudeRunning(): Promise<Session[]> {
     const m = l.trim().match(/^(\d+)\s+(\S+)/);
     if (m) ttyByPid.set(Number(m[1]), m[2] === "??" ? "" : m[2]);
   }
-  return arr.map(a => {
+  const list = arr.map(a => {
     let status: string = a.status ?? "idle";
     if (/wait|input|need/i.test(status)) status = "waiting";
     return {
@@ -155,6 +159,8 @@ async function claudeRunning(): Promise<Session[]> {
       ageS: Math.max(0, Math.floor((Date.now() - a.startedAt) / 1000)),
     };
   });
+  lastClaudeRunning = { at: Date.now(), list };
+  return list;
 }
 
 async function codexRunning(): Promise<Session[]> {
@@ -345,10 +351,12 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   for (const t of need) {
     if (result.has(t)) continue;
     const cached = itermScreens.get(t);
-    if (cached && Date.now() - cached.at < 7000) result.set(t, cached.text);
+    if (cached && Date.now() - cached.at < 15_000) result.set(t, cached.text);
   }
-  // 残りは AppleScript で一括取得(モノクロ・フォールバック)
-  if ([...need].some(t => !result.has(t))) {
+  // AppleScript 一括取得はヘルパーが死んでいるときだけのフォールバック。
+  // ヘルパー稼働中に毎サイクル併走させると iTerm2 の Apple Events が渋滞し、
+  // フォーカスやキー送信まで遅くなる(iTerm2外のターミナルはどのみち取得不能)
+  if (!itermHelperOk && [...need].some(t => !result.has(t))) {
     const raw = await osascript(ITERM_CAPTURE_SCRIPT.replace(/\\u0001/g, "\x01").replace(/\\u0002/g, "\x02"));
     for (const chunk of raw.split("\x01")) {
       if (!chunk.startsWith("TTY:")) continue;
@@ -420,8 +428,9 @@ function detectPrompt(screen: string | undefined): PromptInfo | null {
 const gitCache = new Map<string, { info: GitInfo | null; at: number }>();
 async function gitInfo(cwd: string): Promise<GitInfo | null> {
   const c = gitCache.get(cwd);
-  if (c && Date.now() - c.at < 15_000) return c.info;
-  const out = await sh(["git", "-C", cwd, "status", "--porcelain", "--branch"]);
+  if (c && Date.now() - c.at < 30_000) return c.info;
+  // -uno: 未追跡ファイルの走査を省く(大リポジトリで status が数秒かかるのを防ぐ)
+  const out = await sh(["git", "-C", cwd, "status", "--porcelain", "--branch", "-uno"]);
   let info: GitInfo | null = null;
   if (out) {
     const lines = out.trimEnd().split("\n");
@@ -875,10 +884,12 @@ async function searchLogs(q: string): Promise<SearchHit[]> {
 // ---------------------------------------------------------------- 全文検索インデックス(SQLite FTS5)
 // 直近 AGD_INDEX_DAYS(既定30日)のトランスクリプトを trigram FTS でインデックスする。
 // 3文字未満の語を含むクエリは LIKE にフォールバック(日本語2文字語対応)。
-const INDEX_DAYS = Number(process.env.AGD_INDEX_DAYS || 30);
-const INDEX_TEXT_CAP = 8000;
+const INDEX_DAYS = Number(process.env.AGD_INDEX_DAYS || 14);
+const INDEX_TEXT_CAP = 2000;
 mkdirSync(join(HOME, ".cache", "agd"), { recursive: true });
 const searchDb = new Database(join(HOME, ".cache", "agd", "search.db"));
+searchDb.run("PRAGMA journal_mode = WAL");
+searchDb.run("PRAGMA synchronous = NORMAL");
 searchDb.run(`CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER, agent TEXT, sid TEXT)`);
 searchDb.run(`CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT, idx INTEGER, role TEXT, ts TEXT, text TEXT)`);
 searchDb.run(`CREATE INDEX IF NOT EXISTS entries_path ON entries(path)`);
@@ -909,15 +920,27 @@ function indexTargets(): IndexTarget[] {
 }
 
 // ファイルの追記分だけをインデックスに反映(オフセットは行境界で管理)
+// 指定ファイルのエントリを FTS ごと削除する。
+// 注意: entries_fts(...) VALUES('rebuild') は全テーブル同期再構築でイベントループを
+// 数十秒〜数分ブロックするため絶対に使わない(過去に全操作が固まる障害の原因になった)
+function dropFileFromIndex(path: string) {
+  const rows = searchDb.query(`SELECT id, text FROM entries WHERE path = ?`).all(path) as { id: number; text: string }[];
+  if (!rows.length) return;
+  const delF = searchDb.prepare(`INSERT INTO entries_fts(entries_fts, rowid, text) VALUES('delete', ?, ?)`);
+  const tx = searchDb.transaction(() => {
+    for (const r of rows) delF.run(r.id, r.text);
+    searchDb.run(`DELETE FROM entries WHERE path = ?`, [path]);
+  });
+  tx();
+}
+
 function indexFile(t: IndexTarget) {
   let st;
   try { st = statSync(t.path); } catch { return; }
   const row = searchDb.query(`SELECT offset FROM files WHERE path = ?`).get(t.path) as { offset: number } | null;
   let offset = row?.offset ?? 0;
   if (st.size < offset) {
-    // ファイルが縮んだ → 作り直し
-    searchDb.run(`DELETE FROM entries WHERE path = ?`, [t.path]);
-    searchDb.run(`INSERT INTO entries_fts(entries_fts) VALUES('rebuild')`);
+    dropFileFromIndex(t.path);  // ファイルが縮んだ → そのファイル分だけ作り直し
     offset = 0;
   }
   if (st.size <= offset) {
@@ -944,8 +967,8 @@ function indexFile(t: IndexTarget) {
     const tx = searchDb.transaction(() => {
       parsed.forEach((e, i) => {
         const text = e.text.slice(0, INDEX_TEXT_CAP);
-        insE.run(t.path, base + i, e.role, e.ts ?? "", text);
-        insF.run(Number((searchDb.query(`SELECT last_insert_rowid() AS id`).get() as any).id), text);
+        const r = insE.run(t.path, base + i, e.role, e.ts ?? "", text);
+        insF.run(Number(r.lastInsertRowid), text);
       });
       searchDb.run(`INSERT INTO files(path, offset, agent, sid) VALUES(?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET offset = excluded.offset`, [t.path, offset, t.agent, t.sid]);
@@ -960,13 +983,11 @@ async function buildIndex() {
   // 期間外の古いファイルをインデックスから掃除
   const keep = new Set(targets.map(t => t.path));
   const stale = searchDb.query(`SELECT path FROM files`).all() as { path: string }[];
-  let pruned = false;
   for (const r of stale) if (!keep.has(r.path)) {
-    searchDb.run(`DELETE FROM entries WHERE path = ?`, [r.path]);
+    dropFileFromIndex(r.path);
     searchDb.run(`DELETE FROM files WHERE path = ?`, [r.path]);
-    pruned = true;
+    await Bun.sleep(10);  // 大量削除でもイベントループを長時間塞がない
   }
-  if (pruned) searchDb.run(`INSERT INTO entries_fts(entries_fts) VALUES('rebuild')`);
   for (const t of targets) {
     indexFile(t);
     indexProgress.done++;
