@@ -6,7 +6,7 @@
 //   送信: {type:"ready"} {type:"progress", done, total} {type:"searchResult", id, hits}
 //         {type:"summariesAll", list} {type:"summary", key, text} {type:"log", msg}
 import { Database } from "bun:sqlite";
-import { statSync, rmSync } from "fs";
+import { statSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { parseClaudeLines, parseCodexLines, readTranscript, type LogEntry } from "./transcript";
@@ -18,6 +18,9 @@ const HOME = homedir();
 const DB_PATH = join(HOME, ".cache", "agd", "search.db");
 const INDEX_TEXT_CAP = 2000;
 const MAX_DB_MB = Number(process.env.AGD_INDEX_MAX_MB || 300);
+
+// ---- 置き場所の確保。~/.cache は外部ツールに丸ごと消されることがあるため毎回作る ----
+try { mkdirSync(join(HOME, ".cache", "agd"), { recursive: true }); } catch {}
 
 // ---- サイズガード: 上限超過なら作り直し(開く前にチェック) ----
 try {
@@ -116,6 +119,11 @@ async function reindex(targets: IndexTarget[]) {
       indexReady = true;
       postMessage({ type: "ready", files: targets.length });
     }
+  } catch (err: any) {
+    // DB が外部から消される等の I/O エラーで Worker ごと落とさない。次回の
+    // reindex で作り直しを試みる(ディレクトリ再作成込み)。
+    postMessage({ type: "log", msg: `reindex 失敗: ${err?.message ?? err}` });
+    try { mkdirSync(join(HOME, ".cache", "agd"), { recursive: true }); } catch {}
   } finally { reindexing = false; }
 }
 
@@ -223,12 +231,19 @@ ${body}
 // ---- メッセージディスパッチ ----
 self.onmessage = (e: MessageEvent) => {
   const m = e.data;
-  if (m.type === "reindex") void reindex(m.targets);
-  else if (m.type === "search") postMessage({ type: "searchResult", id: m.id, hits: searchIndex(m.q) });
-  else if (m.type === "summarize") {
-    if (sumQueued.has(m.key)) return;
-    sumQueued.add(m.key);
-    sumQueue.push({ key: m.key, path: m.path, agent: m.agent, force: !!m.force });
-    void runSumQueue();
+  // どのハンドラで例外が出ても Worker を落とさない。落ちるとメイン側の
+  // postMessage が毎ポーリング例外になり、ダッシュボード全体が止まる。
+  try {
+    if (m.type === "reindex") void reindex(m.targets);
+    else if (m.type === "search") postMessage({ type: "searchResult", id: m.id, hits: searchIndex(m.q) });
+    else if (m.type === "summarize") {
+      if (sumQueued.has(m.key)) return;
+      sumQueued.add(m.key);
+      sumQueue.push({ key: m.key, path: m.path, agent: m.agent, force: !!m.force });
+      void runSumQueue();
+    }
+  } catch (err: any) {
+    postMessage({ type: "log", msg: `worker ${m?.type} 失敗: ${err?.message ?? err}` });
+    if (m?.type === "search") postMessage({ type: "searchResult", id: m.id, hits: null });
   }
 };

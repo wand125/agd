@@ -884,19 +884,52 @@ let workerProgress = { done: 0, total: 0 };
 const searchPending = new Map<number, (hits: any[] | null) => void>();
 let searchSeq = 0;
 
-const searchWorker = new Worker(new URL("./search-worker.ts", import.meta.url).href);
-searchWorker.onmessage = (e: MessageEvent) => {
-  const m = e.data;
-  if (m.type === "ready") { workerReady = true; console.log(`search index ready: ${m.files} files`); }
-  else if (m.type === "progress") workerProgress = { done: m.done, total: m.total };
-  else if (m.type === "summariesAll") { for (const s of m.list) summariesMap.set(s.key, s.text); }
-  else if (m.type === "summary") summariesMap.set(m.key, m.text);
-  else if (m.type === "searchResult") { searchPending.get(m.id)?.(m.hits); searchPending.delete(m.id); }
-  else if (m.type === "log") console.log("worker:", m.msg);
-};
-searchWorker.onerror = (e: any) => console.error("worker error:", e?.message ?? e);
+// Worker は死にうる(DB の I/O エラー等)。死んだまま放置すると要約・検索が
+// 永久に止まり、postMessage が毎ポーリング例外になるので、自動で作り直す。
+let searchWorker: Worker;
+let workerDeadAt = 0;
 
-function sendReindex() { try { searchWorker.postMessage({ type: "reindex", targets: indexTargets() }); } catch {} }
+function spawnWorker() {
+  const w = new Worker(new URL("./search-worker.ts", import.meta.url).href);
+  w.onmessage = (e: MessageEvent) => {
+    const m = e.data;
+    if (m.type === "ready") { workerReady = true; console.log(`search index ready: ${m.files} files`); }
+    else if (m.type === "progress") workerProgress = { done: m.done, total: m.total };
+    else if (m.type === "summariesAll") { for (const s of m.list) summariesMap.set(s.key, s.text); }
+    else if (m.type === "summary") summariesMap.set(m.key, m.text);
+    else if (m.type === "searchResult") { searchPending.get(m.id)?.(m.hits); searchPending.delete(m.id); }
+    else if (m.type === "log") console.log("worker:", m.msg);
+  };
+  w.onerror = (e: any) => { console.error("worker error:", e?.message ?? e); markWorkerDead(); };
+  const anyW = w as any;
+  if (typeof anyW.addEventListener === "function")
+    anyW.addEventListener("close", () => markWorkerDead());
+  searchWorker = w;
+}
+
+function markWorkerDead() {
+  if (workerDeadAt) return;           // 再起動待ちの間は多重に走らせない
+  workerDeadAt = Date.now();
+  workerReady = false;
+  for (const [id, res] of searchPending) { res(null); searchPending.delete(id); }
+  // 即再起動すると死因(DB破損など)を繰り返すだけなので少し待つ
+  setTimeout(() => {
+    workerDeadAt = 0;
+    console.log("search worker を再起動します");
+    spawnWorker();
+    sendReindex();
+  }, 30_000);
+}
+
+// postMessage が「terminated」で投げたら死亡確定として再起動を仕掛ける
+function workerPost(msg: unknown): boolean {
+  try { searchWorker.postMessage(msg); return true; }
+  catch { markWorkerDead(); return false; }
+}
+
+spawnWorker();
+
+function sendReindex() { workerPost({ type: "reindex", targets: indexTargets() }); }
 setTimeout(sendReindex, 3000);
 setInterval(sendReindex, 5 * 60_000);
 
@@ -904,7 +937,7 @@ function workerSearch(q: string): Promise<any[] | null> {
   return new Promise(res => {
     const id = ++searchSeq;
     searchPending.set(id, res);
-    searchWorker.postMessage({ type: "search", id, q });
+    if (!workerPost({ type: "search", id, q })) { searchPending.delete(id); return res(null); }
     setTimeout(() => { if (searchPending.delete(id)) res(null); }, 15_000);
   });
 }
@@ -919,7 +952,7 @@ function requestSummary(key: string, force = false, throttled = false) {
   const [agent, sid] = k.split(":") as ["claude" | "codex", string];
   if (!sid) return;
   const path = agent === "claude" ? findClaudeTranscript(sid) : rolloutById(sid)?.path;
-  if (path) searchWorker.postMessage({ type: "summarize", key: k, path, agent, force });
+  if (path) workerPost({ type: "summarize", key: k, path, agent, force });
 }
 
 // Worker の生ヒットに名前・cwd を付与(メイン側のメタ情報を使う)
