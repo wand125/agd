@@ -4,9 +4,10 @@
 import Cocoa
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
+    private var retryTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -22,11 +23,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
 
         webView = WKWebView(frame: rect, configuration: WKWebViewConfiguration())
         webView.uiDelegate = self
-        let port = ProcessInfo.processInfo.environment["AGD_PORT"] ?? "8787"
-        webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+        webView.navigationDelegate = self
+        load()
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private var dashboardURL: URL {
+        let port = ProcessInfo.processInfo.environment["AGD_PORT"] ?? "8787"
+        return URL(string: "http://127.0.0.1:\(port)/")!
+    }
+
+    private func load() {
+        // キャッシュを使わず必ずサーバーに問い合わせる(古い画面で固まるのを防ぐ)
+        webView.load(URLRequest(url: dashboardURL, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
+    @objc func reloadPage(_ sender: Any?) {
+        retryTimer?.invalidate(); retryTimer = nil
+        load()
+    }
+
+    // サーバー再起動中などで読み込みに失敗したら、復帰まで2秒ごとに再試行する。
+    // これが無いと空白のまま固まり、ユーザーに復旧手段が無くなる。
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        scheduleRetry()
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        scheduleRetry()
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        retryTimer?.invalidate(); retryTimer = nil
+    }
+    // レンダラー(Webプロセス)が落ちた場合も自動で復帰させる
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        load()
+    }
+
+    private func scheduleRetry() {
+        guard retryTimer == nil else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.load()
+        }
     }
 
     // Dock クリック時: 新規ウィンドウは作らず既存を前面化(閉じていたら再表示)
@@ -68,6 +107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
         editMenu.addItem(NSMenuItem(title: "ペースト", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "すべてを選択", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editItem.submenu = editMenu
+
+        let viewItem = NSMenuItem()
+        main.addItem(viewItem)
+        let viewMenu = NSMenu(title: "表示")
+        viewMenu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadPage(_:)), keyEquivalent: "r"))
+        viewItem.submenu = viewMenu
 
         let windowItem = NSMenuItem()
         main.addItem(windowItem)
