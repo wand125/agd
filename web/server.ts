@@ -6,7 +6,7 @@ import { join } from "path";
 import { readTranscript, truncateEntry, type LogEntry } from "./transcript";
 import {
   remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing,
-  syncRemoteTranscript,
+  syncRemoteTranscript, remoteSelectPane,
   type RemoteHost,
 } from "./remote";
 import { homedir } from "os";
@@ -1084,6 +1084,47 @@ function remoteCacheList(): RemoteSession[] {
 
 // カードキーから remote 情報を引く。操作系 API はまずこれを見て、
 // 該当すれば ssh 経由に振り分ける(リモートは tty を持たないため)
+// 手元のターミナルで `ssh <host> ... tmux attach -t <session>` を開いていれば、
+// その tty にフォーカスすればリモートの画面が見られる。f(ジャンプ)を
+// リモートでも成立させるため、ローカルの ssh プロセスから対応表を作る。
+type SshAttach = { host: string; tmuxSession: string; tty: string };
+let sshAttachCache: { at: number; list: SshAttach[] } = { at: 0, list: [] };
+
+async function sshAttachments(): Promise<SshAttach[]> {
+  if (Date.now() - sshAttachCache.at < 3000) return sshAttachCache.list;
+  const out = await sh(["ps", "-axo", "pid=,tty=,command="]);
+  const list: SshAttach[] = [];
+  for (const l of out.split("\n")) {
+    const m = l.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const [, , tty, cmd] = m;
+    if (tty === "??" || !/(^|\/)ssh\s/.test(cmd)) continue;   // tty を持つ対話 ssh だけ
+    // 宛先は最初の非オプション引数。-o foo / -t のようなフラグは読み飛ばす
+    const toks = cmd.split(/\s+/).slice(1);
+    let host = "";
+    for (let i = 0; i < toks.length; i++) {
+      const tk = toks[i];
+      if (tk === "-o" || tk === "-i" || tk === "-p" || tk === "-l" || tk === "-F") { i++; continue; }
+      if (tk.startsWith("-")) continue;
+      host = tk.replace(/^.*@/, "");
+      break;
+    }
+    if (!host) continue;
+    const sess = cmd.match(/tmux\s+(?:attach|attach-session|a)\b[^\n]*?-t\s+([A-Za-z0-9_.-]+)/)?.[1] ?? "";
+    list.push({ host, tmuxSession: sess, tty });
+  }
+  sshAttachCache = { at: Date.now(), list };
+  return list;
+}
+
+// リモートセッションに対応するローカル tty を返す(無ければ null)。
+// tmux セッション名まで一致するものを優先し、無ければ同ホストの ssh を使う。
+async function localTtyForRemote(host: string, target: string): Promise<string | null> {
+  const want = target.split(":")[0];              // "consult:0.0" → "consult"
+  const list = (await sshAttachments()).filter(a => a.host === host);
+  return list.find(a => a.tmuxSession === want)?.tty ?? list.find(a => !a.tmuxSession)?.tty ?? null;
+}
+
 // sid からリモートホストを引く(トランスクリプト取得用)。
 // リモートの sid はローカルに存在しないので、これで先に振り分ける。
 function remoteHostBySid(sid: string): RemoteHost | null {
@@ -1438,7 +1479,17 @@ try {
       return Response.json({ result: r });
     }
     if (req.method === "POST" && url.pathname === "/api/focus") {
-      const { tty } = await req.json();
+      const { tty, cardKey } = await req.json();
+      // リモートは手元で ssh + tmux attach しているターミナルがあればそこへ飛ぶ
+      const rm = remoteOf(String(cardKey ?? ""));
+      if (rm) {
+        const s = remoteCacheList().find(x => x.key === cardKey);
+        const localTty = s?.remote ? await localTtyForRemote(s.remote.host, s.remote.target) : null;
+        if (!localTty) return Response.json({ result: "error: no local ssh session" });
+        // 目的のペインを手元の tmux 表示にも切り替えてからフォーカスする
+        if (s?.remote) await remoteSelectPane(rm.h, s.remote.paneId);
+        return Response.json({ result: await focusTty(localTty) });
+      }
       const r = await focusTty(tty);
       return Response.json({ result: r });
     }

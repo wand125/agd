@@ -193,6 +193,12 @@ export async function remoteKey(h: RemoteHost, paneId: string, key: string): Pro
   return "ok(remote)";
 }
 
+// 手元の tmux 表示を目的のペインへ切り替える(ジャンプ時に使う)。
+// attach 中のクライアントに、そのペインのウィンドウを選ばせる。
+export async function remoteSelectPane(h: RemoteHost, paneId: string): Promise<void> {
+  await shRemote(h, `tmux select-window -t ${q(paneId)} \\; select-pane -t ${q(paneId)} 2>/dev/null`);
+}
+
 export async function remoteClose(h: RemoteHost, paneId: string): Promise<string> {
   await shRemote(h, `tmux kill-pane -t ${q(paneId)}`);
   return "ok(remote)";

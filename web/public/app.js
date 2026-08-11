@@ -382,8 +382,6 @@ function renderGrid() {
     pt.style.background = projColor(s.cwd);
     el.querySelector(".card-title").textContent = maskText(s.name);
     el.querySelector(".card-meta").textContent = fmtAge(s.ageS);
-    // リモートは別マシンなのでターミナルへのジャンプができない。ボタンを隠す
-    el.querySelector(".go-btn").style.display = s.remote ? "none" : "";
     el.querySelector(".git-badge").innerHTML = gitBadge(s.git);
     el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.key));
     const sum = el.querySelector(".card-summary");
@@ -848,8 +846,12 @@ async function confirmEnter(key) {
 async function jump(key) {
   const s = sessionOf(key);
   if (!s) return;
-  // リモートは別マシンのターミナルなのでフォーカスを移せない。理由を明示する
-  if (s.remote) { toast(t("toast.remoteNoJump", { host: s.remote.host })); return; }
+  // リモートでも、手元で ssh + tmux attach しているターミナルがあればそこへ飛べる
+  if (s.remote) {
+    const r = await api("/api/focus", { cardKey: s.key });
+    if (!(r.result || "").startsWith("ok")) toast(t("toast.remoteNoJump", { host: s.remote.host }));
+    return;
+  }
   if (!s.tty) { toast(t("toast.ttyJumpUnknown")); return; }
   await api("/api/focus", { tty: s.tty });
 }
@@ -1081,7 +1083,7 @@ async function openDetail(key) {
   setScreen($("d-screen"), s.screen ?? t("detail.screenUnavailable"));
   $("d-screen").scrollTop = $("d-screen").scrollHeight;
   $("d-input").dataset.tty = s.tty ?? "";
-  $("d-jump").style.display = s.tty && !s.remote ? "" : "none";
+  $("d-jump").style.display = s.tty || s.remote ? "" : "none";
   $("d-jump").onclick = () => jump(key);
   renderPromptBar($("d-prompt"), s);
   $("d-input").blur();  // デフォルトはスクロールモード。i で入力モードへ
