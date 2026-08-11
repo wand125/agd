@@ -4,6 +4,10 @@
 import { readdirSync, statSync, existsSync, readFileSync, openSync, readSync, closeSync, mkdirSync } from "fs";
 import { join } from "path";
 import { readTranscript, truncateEntry, type LogEntry } from "./transcript";
+import {
+  remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing,
+  type RemoteHost,
+} from "./remote";
 import { homedir } from "os";
 
 const PORT = Number(process.env.AGD_PORT || 8787);
@@ -157,6 +161,8 @@ export type Session = {
   ageS: number;           // 最終アクティビティからの秒数(概算)
   prompt?: PromptInfo;    // 画面から検出した選択プロンプト
   git?: GitInfo;
+  // ssh 越しの tmux ペイン。これがあるとキャプチャ・操作は remote 経由になる
+  remote?: { host: string; paneId: string; target: string };
 };
 
 let lastClaudeRunning: { at: number; list: Session[] } = { at: 0, list: [] };
@@ -522,8 +528,10 @@ async function gitInfo(cwd: string): Promise<GitInfo | null> {
 
 // ---------------------------------------------------------------- 設定 + macOS 通知
 const CONFIG_PATH = join(HOME, ".cache", "agd", "config.json");
-let config: { macNotify: boolean; summarize?: boolean } = { macNotify: false, summarize: true };
+let config: { macNotify: boolean; summarize?: boolean; remotes?: RemoteHost[] } =
+  { macNotify: false, summarize: true, remotes: [] };
 try { config = { ...config, ...JSON.parse(readFileSync(CONFIG_PATH, "utf8")) }; } catch {}
+if (!Array.isArray(config.remotes)) config.remotes = [];
 async function saveConfig() { try { await Bun.write(CONFIG_PATH, JSON.stringify(config)); } catch {} }
 
 let notifierPath: string | null | undefined; // undefined=未チェック
@@ -1038,12 +1046,80 @@ const keyAssign = new Map<string, string>();  // "agent:sid:pid" → 確定済�
 const prevStatus = new Map<string, string>();
 const wsClients = new Set<any>();
 
+// ---------------------------------------------------------------- リモート(ssh + tmux)
+// ssh は往復が読めないためメインのポーリングとは分離し、独立タイマーで
+// キャッシュを更新する。poll() はキャッシュを読むだけなので遅延に巻き込まれない。
+type RemoteSession = Session & { screen?: string };
+const remoteCache = new Map<string, { list: RemoteSession[]; at: number }>();
+const REMOTE_POLL_MS = 5000;
+const REMOTE_STALE_MS = 60_000;   // これを超えて更新できないホストは一覧から落とす
+
+function remoteHosts(): RemoteHost[] { return config.remotes ?? []; }
+function remoteHostOf(host: string): RemoteHost | undefined {
+  return remoteHosts().find(h => h.host === host);
+}
+function remoteCacheList(): RemoteSession[] {
+  const now = Date.now();
+  const out: RemoteSession[] = [];
+  for (const [host, v] of remoteCache) {
+    if (now - v.at > REMOTE_STALE_MS) continue;
+    if (!remoteHostOf(host)) continue;   // 設定から消えたホストは出さない
+    out.push(...v.list);
+  }
+  return out;
+}
+
+// カードキーから remote 情報を引く。操作系 API はまずこれを見て、
+// 該当すれば ssh 経由に振り分ける(リモートは tty を持たないため)
+function remoteOf(key: string): { h: RemoteHost; paneId: string } | null {
+  if (!key) return null;
+  for (const v of remoteCache.values()) {
+    const s = v.list.find(x => x.key === key);
+    if (s?.remote) {
+      const h = remoteHostOf(s.remote.host);
+      if (h) return { h, paneId: s.remote.paneId };
+    }
+  }
+  return null;
+}
+
+let remotePolling = false;
+async function pollRemotes() {
+  if (remotePolling) return;
+  const hosts = remoteHosts();
+  if (!hosts.length) return;
+  remotePolling = true;
+  try {
+    await Promise.all(hosts.map(async h => {
+      try {
+        const list: RemoteSession[] = await remoteSessions(h);
+        // 画面も同時に取っておく(カード表示のたびに ssh を張らないため)
+        await Promise.all(list.map(async s => {
+          if (!s.remote) return;
+          const text = await remoteCapture(h, s.remote.paneId);
+          if (!text) return;
+          s.screen = text.trimEnd();
+          // waiting への昇格条件はローカルと揃える(カーソルだけの誤検出を防ぐ)
+          const p = detectPrompt(s.screen);
+          if (!p) return;
+          s.prompt = p;
+          const confident = p.kind === "numbered" || (s.agent === "codex" && p.kind === "cursor");
+          if (confident && s.status === "idle") s.status = "waiting";
+        }));
+        remoteCache.set(h.host, { list, at: Date.now() });
+      } catch (e: any) {
+        console.error(`remote ${h.host}: ${e?.message ?? e}`);
+      }
+    }));
+  } finally { remotePolling = false; }
+}
+
 async function poll() {
   try {
     await updateRolloutCache();
     loadCodexNames();
     const [cr, xr] = await Promise.all([claudeRunning(), codexRunning()]);
-    const running = [...cr, ...xr];
+    const running = [...cr, ...xr, ...remoteCacheList()];
     // 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)のキー衝突対策。
     // 重要: 一度プロセス(pid)に割り当てたキーは、そのプロセスが生きている限り変えない。
     // (元プロセス終了時に新プロセスのキーが SID#PID → SID に変わると、カードの同一性が
@@ -1106,7 +1182,8 @@ async function poll() {
     const order: Record<string, number> = { waiting: 0, busy: 1, idle: 2, resumable: 3 };
     const sessions = [...running, ...recents]
       .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.ageS - b.ageS)
-      .map(s => ({ ...s, screen: screens.get(s.tty), summary: summariesMap.get(baseKey(s.key)) }));
+      // リモートは tty を持たず pollRemotes が s.screen を埋めているので温存する
+      .map(s => ({ ...s, screen: (s as RemoteSession).screen ?? screens.get(s.tty), summary: summariesMap.get(baseKey(s.key)) }));
     lastSnapshot = { sessions, at: Date.now() };
     // 状態変化検知 → 通知イベント
     const changes: { key: string; name: string; agent: string; from: string; to: string; tty: string }[] = [];
@@ -1203,7 +1280,14 @@ try {
       return Response.json({ ...config, pathStrip });
     }
     if (req.method === "POST" && url.pathname === "/api/key") {
-      const { tty, key, keys } = await req.json();
+      const { tty, key, keys, cardKey } = await req.json();
+      const rm = remoteOf(String(cardKey ?? ""));
+      if (rm) {
+        const list = Array.isArray(keys) ? keys : [key];
+        let out = "";
+        for (const k of list) out = await remoteKey(rm.h, rm.paneId, String(k).slice(0, 10));
+        return Response.json({ result: out });
+      }
       if (!tty || (!key && !Array.isArray(keys))) return Response.json({ error: "tty and key(s) required" }, { status: 400 });
       const r = Array.isArray(keys)
         ? await sendKeysToTty(tty, keys.map((k: any) => String(k).slice(0, 10)))
@@ -1276,10 +1360,40 @@ try {
       return Response.json({ dirs, exists });
     }
     if (req.method === "POST" && url.pathname === "/api/send") {
-      const { tty, text } = await req.json();
-      if (!tty || !text) return Response.json({ error: "tty and text required" }, { status: 400 });
+      const { tty, text, cardKey } = await req.json();
+      if (!text) return Response.json({ error: "text required" }, { status: 400 });
+      const rm = remoteOf(String(cardKey ?? ""));
+      if (rm) return Response.json({ result: await remoteSend(rm.h, rm.paneId, String(text)) });
+      if (!tty) return Response.json({ error: "tty and text required" }, { status: 400 });
       const r = await sendToTty(tty, text);
       return Response.json({ result: r });
+    }
+    if (url.pathname === "/api/remotes") {
+      if (req.method === "GET") {
+        const now = Date.now();
+        return Response.json({
+          remotes: remoteHosts().map(h => {
+            const c = remoteCache.get(h.host);
+            return {
+              ...h,
+              sessions: c?.list.length ?? 0,
+              connected: !!c && now - c.at < REMOTE_STALE_MS,
+              ageS: c ? Math.round((now - c.at) / 1000) : null,
+            };
+          }),
+        });
+      }
+      if (req.method === "POST") {
+        const { host, label, path, remove } = await req.json();
+        if (!host) return Response.json({ error: "host required" }, { status: 400 });
+        const list = remoteHosts().filter(h => h.host !== host);
+        if (!remove) list.push({ host: String(host), label, path });
+        else remoteCache.delete(String(host));
+        config.remotes = list;
+        await saveConfig();
+        if (!remove) pollRemotes();
+        return Response.json({ ok: true, remotes: config.remotes });
+      }
     }
     if (req.method === "POST" && url.pathname === "/api/summarize") {
       const { key } = await req.json();
@@ -1288,7 +1402,9 @@ try {
       return Response.json({ result: "queued" });
     }
     if (req.method === "POST" && url.pathname === "/api/close") {
-      const { tty } = await req.json();
+      const { tty, cardKey } = await req.json();
+      const rm = remoteOf(String(cardKey ?? ""));
+      if (rm) return Response.json({ result: await remoteClose(rm.h, rm.paneId) });
       if (!tty) return Response.json({ error: "tty required" }, { status: 400 });
       const r = await closeTty(tty);
       return Response.json({ result: r });
@@ -1328,3 +1444,11 @@ try {
 
 console.log(`agd web: http://localhost:${PORT}`);
 poll();
+
+// リモートは ssh の往復が読めないので独立したタイマーで回す
+if (remoteHosts().length) {
+  for (const h of remoteHosts())
+    remotePing(h).then(ok => console.log(`remote ${h.host}: ${ok ? "connected" : "unreachable (ssh か tmux が無い)"}`));
+  pollRemotes();
+  setInterval(pollRemotes, REMOTE_POLL_MS);
+}

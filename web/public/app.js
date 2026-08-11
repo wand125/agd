@@ -456,6 +456,12 @@ function buildCard(key) {
   return el;
 }
 
+// 操作先の識別。ローカルは tty、リモート(ssh+tmux)は remote を持つ。
+// tty が無い＝操作不能ではないので、判定は必ずこれを通す。
+const canOperate = (s) => !!s && !!s.running && (!!s.tty || !!s.remote);
+// API に渡す宛先。サーバー側は cardKey があれば remote を優先解決する
+const target = (s) => ({ tty: s?.tty ?? "", cardKey: s?.key ?? "" });
+
 let listKey = null;  // セッションタブでの選択中セッションkey
 function updateListSelection() {
   document.querySelectorAll("#list-view .resume-row").forEach(r =>
@@ -606,16 +612,16 @@ function curSelKey() {
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
 async function sendNamedKey(k, label) {
   const s = sessionOf(curSelKey());
-  if (!s?.running || !s.tty) { toast(t("toast.selectRunning")); return; }
-  const r = await api("/api/key", { tty: s.tty, key: k });
+  if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
+  const r = await api("/api/key", { ...target(s), key: k });
   if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: label, name: s.name }));
   else toast(t("toast.sendFailed", { err: r.result }));
 }
 // 選択セッションへテキスト送信(スラッシュコマンド用)
 async function sendTextToSelected(text) {
   const s = sessionOf(curSelKey());
-  if (!s?.running || !s.tty) { toast(t("toast.selectRunning")); return; }
-  const r = await api("/api/send", { tty: s.tty, text });
+  if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
+  const r = await api("/api/send", { ...target(s), text });
   if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: text, name: s.name }));
   else toast(t("toast.sendFailed", { err: r.result }));
 }
@@ -626,10 +632,10 @@ async function runCommand(c) {
     if (!s) { toast(t("toast.qNoSession")); return; }
     const viewing = detailKey === selKey && $("overlay").classList.contains("show");
     if (s.running) {
-      if (!s.tty) { toast(t("toast.ttyCloseUnknown")); return; }
+      if (!canOperate(s)) { toast(t("toast.ttyCloseUnknown")); return; }
       closing.add(s.key);
       render();
-      const r = await api("/api/close", { tty: s.tty });
+      const r = await api("/api/close", { ...target(s) });
       if ((r.result || "").startsWith("ok")) {
         toast(t("toast.closed", { name: s.name }));
         if (viewing) closeDetail();  // 表示中のセッションを終了したらポップアップも閉じる
@@ -749,7 +755,7 @@ function gitBadge(g) {
 
 // ---------------- 選択プロンプト応答 ----------------
 function renderPromptBar(bar, s) {
-  if (s.status !== "waiting" || !s.tty) { bar.style.display = "none"; return; }
+  if (s.status !== "waiting" || !canOperate(s)) { bar.style.display = "none"; return; }
   bar.style.display = "flex";  // #d-prompt は CSS で display:none のため、インラインで明示的に上書きする
   const p = s.prompt;
   const opts = p?.options ?? [];
@@ -784,9 +790,9 @@ function renderPromptBar(bar, s) {
       if (cursorStyle) {
         const delta = Number(b.dataset.index) - (p.cursorIndex ?? 0);
         const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-        r = await api("/api/key", { tty: s.tty, keys });
+        r = await api("/api/key", { ...target(s), keys });
       } else {
-        r = await api("/api/key", { tty: s.tty, key: b.dataset.key });
+        r = await api("/api/key", { ...target(s), key: b.dataset.key });
       }
       if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
       else toast(t("toast.sendFailed", { err: r.result }));
@@ -800,16 +806,16 @@ function renderPromptBar(bar, s) {
 function answerByCursor(s, n) {
   const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
   const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-  api("/api/key", { tty: s.tty, keys }).then(() => toast(t("toast.optionConfirmed", { n })));
+  api("/api/key", { ...target(s), keys }).then(() => toast(t("toast.optionConfirmed", { n })));
 }
 function answerPromptByNumber(sessKey, n) {
   const s = sessionOf(sessKey);
-  if (!(s?.status === "waiting" && s.tty && s.prompt)) return false;
+  if (!(s?.status === "waiting" && canOperate(s) && s.prompt)) return false;
   const count = (s.prompt.options ?? []).length;
   if (n > count) return false;
   if (s.prompt.kind === "numbered" && s.agent === "claude") {
     // claude の番号付きプロンプトは数字キーで直接選択できる
-    api("/api/key", { tty: s.tty, key: String(n) }).then(() => toast(t("toast.numberSent", { n })));
+    api("/api/key", { ...target(s), key: String(n) }).then(() => toast(t("toast.numberSent", { n })));
     return true;
   }
   // codex の番号付き・両者のカーソル型はカーソル移動+Enter で確定
@@ -820,11 +826,11 @@ function answerPromptByNumber(sessKey, n) {
 let confirmBusy = false;
 async function confirmEnter(key) {
   const s = sessionOf(key);
-  if (!s || !s.tty || confirmBusy) return;
+  if (!canOperate(s) || confirmBusy) return;
   if (s.status !== "waiting") { toast(t("toast.notWaiting")); return; }
   confirmBusy = true;
   try {
-    const r = await api("/api/key", { tty: s.tty, key: "Enter" });
+    const r = await api("/api/key", { ...target(s), key: "Enter" });
     if ((r.result || "").startsWith("ok")) toast(t("toast.enterSent"));
     else toast(t("toast.sendFailed", { err: r.result }));
   } finally { confirmBusy = false; }
@@ -845,11 +851,11 @@ async function sendTo(key, input) {
   const s = sessionOf(key);
   const text = input.value.replace(/\s+$/, "");  // 末尾の空白改行だけ除去(内部改行は保持)
   if (!s || !text.trim() || input.dataset.busy) return;  // 送信中の再入を防ぐ
-  if (!s.tty) { toast(t("toast.ttySendUnknown")); return; }
+  if (!canOperate(s)) { toast(t("toast.ttySendUnknown")); return; }
   input.dataset.busy = "1";
   input.value = "";                          // 先にクリアして二重送信を防止
   autoGrow(input, 140);
-  const r = await api("/api/send", { tty: s.tty, text });
+  const r = await api("/api/send", { ...target(s), text });
   delete input.dataset.busy;
   if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
   else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err: r.result })); }  // 失敗時は復元
@@ -1235,15 +1241,15 @@ function closeDetail() {
 $("overlay").onclick = (e) => { if (e.target === $("overlay")) closeDetail(); };
 let detailSendBusy = false;
 async function sendDetail() {
-  const tty = $("d-input").dataset.tty;
+  const s = sessionOf(detailKey);
   const text = $("d-input").value.replace(/\s+$/, "");
   if (!text) { if (detailKey) confirmEnter(detailKey); return; }
-  if (!tty) { toast(t("toast.detailNotRunning")); return; }
+  if (!canOperate(s)) { toast(t("toast.detailNotRunning")); return; }
   if (detailSendBusy) return;                // 送信中の再入を防ぐ
   detailSendBusy = true;
   $("d-input").value = "";                   // 先にクリアして二重送信を防止
   autoGrow($("d-input"), 200);
-  const r = await api("/api/send", { tty, text });
+  const r = await api("/api/send", { ...target(s), text });
   detailSendBusy = false;
   if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
   else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err: r.result })); }
