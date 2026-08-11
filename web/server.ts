@@ -197,11 +197,20 @@ async function claudeRunning(): Promise<Session[]> {
 
 async function codexRunning(): Promise<Session[]> {
   const psOut = await sh(["ps", "-axo", "pid=,tty=,command="]);
-  const procs: { pid: number; tty: string }[] = [];
+  const procs: { pid: number; tty: string; sid: string }[] = [];
   for (const l of psOut.split("\n")) {
     const m = l.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
     if (!m) continue;
-    if (/^codex( |$)/.test(m[3])) procs.push({ pid: Number(m[1]), tty: m[2] === "??" ? "" : m[2] });
+    const cmd = m[3];
+    // codex は絶対パス(npm の vendor バイナリ)や `node .../bin/codex` の形でも起動する。
+    // 実行ファイル名が codex であればよい。`codex exec`(非対話・agd の管理外)は除外する。
+    const argv0 = cmd.split(/\s+/)[0];
+    if (!/(^|\/)codex$/.test(argv0)) continue;
+    if (/^\S*codex\s+(exec|e)\b/.test(cmd)) continue;
+    // `codex resume <sid>` / `codex fork <sid>` は sid がコマンドラインに出る。
+    // cwd からの逆引きより確実なのでこちらを優先する。
+    const sid = cmd.match(/\b(?:resume|fork)\s+([0-9a-fA-F-]{36})\b/)?.[1] ?? "";
+    procs.push({ pid: Number(m[1]), tty: m[2] === "??" ? "" : m[2], sid });
   }
   if (!procs.length) return [];
   const lsofOut = await sh(["lsof", "-a", "-p", procs.map(p => p.pid).join(","), "-d", "cwd", "-Fpn"]);
@@ -212,15 +221,23 @@ async function codexRunning(): Promise<Session[]> {
     else if (l.startsWith("n")) cwdByPid.set(cur, l.slice(1));
   }
   const now = Date.now() / 1000;
-  return procs.flatMap(p => {
+  const out: Session[] = [];
+  const seenSid = new Set<string>();
+  // node ラッパーと実体バイナリが両方 ps に出るため、tty を持つ方を優先して
+  // 同一セッションを二重に数えない。
+  for (const p of [...procs].sort((a, b) => (b.tty ? 1 : 0) - (a.tty ? 1 : 0))) {
     const cwd = cwdByPid.get(p.pid);
-    if (!cwd) return [];
-    const meta = rolloutByCwd(cwd);
+    if (!cwd) continue;
+    // resume/fork はコマンドラインの sid を信頼する。それ以外は cwd から逆引き
+    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwd(cwd);
+    const sid = meta?.id ?? p.sid;
+    if (sid && seenSid.has(sid)) continue;
+    if (sid) seenSid.add(sid);
     const ageS = meta ? Math.max(0, Math.floor(now - meta.mtime)) : 0;
-    return [{
-      key: `codex:${meta?.id ?? `pid${p.pid}`}`,
+    out.push({
+      key: `codex:${sid || `pid${p.pid}`}`,
       agent: "codex" as const,
-      sid: meta?.id ?? "",
+      sid,
       name: meta ? codexNameFor(meta.id, meta.path) : `pid ${p.pid}`,
       cwd,
       status: meta && now - meta.mtime < BUSY_WINDOW_S ? "busy" : "idle",
@@ -228,8 +245,9 @@ async function codexRunning(): Promise<Session[]> {
       tty: p.tty,
       pid: p.pid,
       ageS,
-    }];
-  });
+    });
+  }
+  return out;
 }
 
 function claudeRecent(excludeSids: Set<string>): Session[] {
