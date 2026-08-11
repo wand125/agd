@@ -875,6 +875,9 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "h") toggleDetailEntry(false);
     else if (/^[1-9]$/.test(e.key) && detailKey) answerPromptByNumber(detailKey, Number(e.key));
     else if (e.key === "i") { e.preventDefault(); $("d-input").focus(); }
+    // 表示中のセッションを対象に複製 / 会話を fork して新タブ起動(グリッドと同じ操作感)
+    else if (e.ctrlKey && (e.key === "n" || e.key === "N") && detailKey) { e.preventDefault(); duplicateSession(detailKey); }
+    else if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey) { e.preventDefault(); resumeContinue(detailKey); }
     else if (e.key === "f" && detailKey) jump(detailKey);
     else if (e.key === "s" && detailKey) sendNamedKey("Escape", "Esc(中断)");
     else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
@@ -1227,10 +1230,15 @@ $("d-input").onkeydown = (e) => {
   e.stopPropagation();
   if (e.isComposing || e.keyCode === 229) return;  // IME変換中は無視
   if (handleHintKeys(e, $("d-input"))) return;
+  // 入力中でも複製 / fork を効かせる。ただし Ctrl+C はテキスト選択中なら
+  // ブラウザ既定のコピーを優先する(選択が無いときだけ fork とみなす)
+  if (e.ctrlKey && (e.key === "n" || e.key === "N") && detailKey) { e.preventDefault(); duplicateSession(detailKey); return; }
+  if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey
+      && e.target.selectionStart === e.target.selectionEnd) { e.preventDefault(); resumeContinue(detailKey); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDetail(); }  // ⇧⏎ は改行
   if (e.key === "Escape") $("d-input").blur();  // スクロールモードへ(閉じるのは q/Esc)
 };
-const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>⏎</kbd>開閉 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>s</kbd>中断 <kbd>:</kbd>cmd <kbd>q</kbd>閉じる";
+const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>⏎</kbd>開閉 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>s</kbd>中断 <kbd>^N</kbd>複製 <kbd>^C</kbd>引継 <kbd>:</kbd>cmd <kbd>q</kbd>閉じる";
 const D_HINT_INSERT = "<kbd>⏎</kbd>送信 <kbd>⇧⏎</kbd>改行 <kbd>Esc</kbd>スクロールモードへ";
 $("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = D_HINT_INSERT; };
 $("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = D_HINT_SCROLL; };
