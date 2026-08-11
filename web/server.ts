@@ -6,6 +6,7 @@ import { join } from "path";
 import { readTranscript, truncateEntry, type LogEntry } from "./transcript";
 import {
   remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing,
+  syncRemoteTranscript,
   type RemoteHost,
 } from "./remote";
 import { homedir } from "os";
@@ -1083,6 +1084,17 @@ function remoteCacheList(): RemoteSession[] {
 
 // カードキーから remote 情報を引く。操作系 API はまずこれを見て、
 // 該当すれば ssh 経由に振り分ける(リモートは tty を持たないため)
+// sid からリモートホストを引く(トランスクリプト取得用)。
+// リモートの sid はローカルに存在しないので、これで先に振り分ける。
+function remoteHostBySid(sid: string): RemoteHost | null {
+  if (!sid) return null;
+  for (const v of remoteCache.values()) {
+    const s = v.list.find(x => x.sid === sid && x.remote);
+    if (s?.remote) return remoteHostOf(s.remote.host) ?? null;
+  }
+  return null;
+}
+
 function remoteOf(key: string): { h: RemoteHost; paneId: string } | null {
   if (!key) return null;
   for (const v of remoteCache.values()) {
@@ -1324,8 +1336,12 @@ try {
       const sid = url.searchParams.get("sid") ?? "";
       const limit = Number(url.searchParams.get("limit") ?? 300);
       const sub = url.searchParams.get("sub");
-      let path = agent === "claude" ? findClaudeTranscript(sid) : rolloutById(sid)?.path;
-      if (sub && agent === "claude" && /^[A-Za-z0-9_-]+$/.test(sub)) {
+      // リモートセッションはログもリモート側にしかないので取り寄せる
+      const rh = remoteHostBySid(sid);
+      let path = rh
+        ? await syncRemoteTranscript(rh, agent === "claude" ? "claude" : "codex", sid)
+        : (agent === "claude" ? findClaudeTranscript(sid) : rolloutById(sid)?.path);
+      if (!rh && sub && agent === "claude" && /^[A-Za-z0-9_-]+$/.test(sub)) {
         const dir = claudeSubagentsDir(sid);
         path = dir ? join(dir, `agent-${sub}.jsonl`) : null;
       }

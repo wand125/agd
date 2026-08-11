@@ -6,7 +6,7 @@
 //
 // 接続コストを抑えるため ssh の ControlMaster を agd 専用の ControlPath で使う。
 // ユーザーの ~/.ssh/config は書き換えない(-o で都度指定する)。
-import { mkdirSync } from "fs";
+import { mkdirSync, statSync, appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { Session } from "./server";
@@ -166,6 +166,58 @@ export async function remoteKey(h: RemoteHost, paneId: string, key: string): Pro
 export async function remoteClose(h: RemoteHost, paneId: string): Promise<string> {
   await shRemote(h, `tmux kill-pane -t ${q(paneId)}`);
   return "ok(remote)";
+}
+
+// ---- トランスクリプト ----
+// リモートのログはリモート側にしかないので、ローカルへ取り寄せてキャッシュする。
+// 毎回全部を転送しないよう、サイズが増えた分だけ追記する(tail -c +N)。
+const TRANS_DIR = join(HOME, ".cache", "agd", "remote-transcripts");
+const fetched = new Map<string, number>();   // ローカルパス → 取り込み済みバイト数
+
+export function remoteTranscriptPath(host: string, agent: string, sid: string): string {
+  return join(TRANS_DIR, `${host}__${agent}__${sid}.jsonl`);
+}
+
+// リモート上のトランスクリプトのパスを解決する(claude のみ。codex は rollout)
+async function remoteTranscriptRemotePath(h: RemoteHost, agent: string, sid: string): Promise<string> {
+  if (agent === "claude") {
+    const out = await shRemote(h, `ls -1 ~/.claude/projects/*/${sid}.jsonl 2>/dev/null | head -1`);
+    return out.trim();
+  }
+  const out = await shRemote(h, `ls -1 ~/.codex/sessions/*/*/*/rollout-*${sid}.jsonl 2>/dev/null | head -1`);
+  return out.trim();
+}
+
+// 差分だけ取り寄せてローカルのパスを返す。取得できなければ null。
+export async function syncRemoteTranscript(h: RemoteHost, agent: string, sid: string): Promise<string | null> {
+  if (!sid) return null;
+  try { mkdirSync(TRANS_DIR, { recursive: true }); } catch {}
+  const local = remoteTranscriptPath(h.host, agent, sid);
+  const remotePath = await remoteTranscriptRemotePath(h, agent, sid);
+  if (!remotePath) return null;
+
+  let have = fetched.get(local);
+  if (have === undefined) {
+    try { have = statSync(local).size; } catch { have = 0; }
+  }
+  // リモートのサイズを見て、増えていなければ何もしない
+  const sizeOut = await shRemote(h, `stat -c %s ${JSON.stringify(remotePath)} 2>/dev/null || wc -c < ${JSON.stringify(remotePath)}`);
+  const size = Number(sizeOut.trim()) || 0;
+  if (size && have && size === have) return local;
+  if (size && have && size < have) { have = 0; }   // 縮んだら取り直し
+
+  // tail -c +N は 1 始まりのバイト位置
+  const cmd = have
+    ? `tail -c +${have + 1} ${JSON.stringify(remotePath)}`
+    : `cat ${JSON.stringify(remotePath)}`;
+  const chunk = await shRemote(h, cmd, 20_000);
+  if (!chunk && !have) return null;
+  try {
+    if (have) appendFileSync(local, chunk);
+    else writeFileSync(local, chunk);
+    fetched.set(local, statSync(local).size);
+  } catch { return null; }
+  return local;
 }
 
 // 接続確認。起動時に一度だけ呼んでログに出す
