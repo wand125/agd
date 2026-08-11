@@ -1041,6 +1041,18 @@ function customCommands(agent: string, cwd: string): [string, string][] {
 
 // ---------------------------------------------------------------- ポーリング + WebSocket
 type Snapshot = { sessions: (Session & { screen?: string })[]; at: number };
+
+// フロント資産の版。更新するとクライアントが自動リロードする。
+// agd.app(WKWebView)は独自キャッシュを持ち手動リロード手段も限られるため、
+// 「サーバーだけ更新してUIが古いまま」という事故を防ぐ。
+function assetVersion(): string {
+  let v = 0;
+  for (const f of ["app.js", "i18n.js", "index.html"]) {
+    try { v = Math.max(v, statSync(join(import.meta.dir, "public", f)).mtimeMs); } catch {}
+  }
+  return String(Math.floor(v));
+}
+const ASSET_VERSION = assetVersion();
 let lastSnapshot: Snapshot = { sessions: [], at: 0 };
 const keyAssign = new Map<string, string>();  // "agent:sid:pid" → 確定済みカードキー
 const prevStatus = new Map<string, string>();
@@ -1208,7 +1220,7 @@ async function poll() {
         }
       }
     }
-    const msg = JSON.stringify({ type: "snapshot", ...lastSnapshot, changes });
+    const msg = JSON.stringify({ type: "snapshot", ...lastSnapshot, changes, assetVersion: assetVersion() });
     for (const ws of wsClients) { try { ws.send(msg); } catch {} }
   } catch (e) {
     console.error("poll error:", e);
@@ -1427,7 +1439,7 @@ try {
   websocket: {
     open(ws) {
       wsClients.add(ws);
-      ws.send(JSON.stringify({ type: "snapshot", ...lastSnapshot, changes: [] }));
+      ws.send(JSON.stringify({ type: "snapshot", ...lastSnapshot, changes: [], assetVersion: assetVersion() }));
     },
     close(ws) { wsClients.delete(ws); },
     message() {},

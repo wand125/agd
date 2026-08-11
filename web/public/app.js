@@ -210,11 +210,18 @@ function toast(msg) {
 function sessionOf(key) { return sessions.find(x => x.key === key); }
 
 // ---------------- WebSocket ----------------
+let assetVersion = null;   // サーバーが配る app.js/i18n.js/index.html の版
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "snapshot") {
+      // フロント資産が更新されたら自動で読み直す。agd.app(WKWebView)は
+      // 手動リロード手段が限られ、古い JS のまま動き続けると原因が掴みにくい
+      if (msg.assetVersion) {
+        if (!assetVersion) assetVersion = msg.assetVersion;
+        else if (assetVersion !== msg.assetVersion) { location.reload(); return; }
+      }
       sessions = msg.sessions || [];
       render();
       (msg.changes || []).forEach(handleChange);
