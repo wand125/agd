@@ -1005,6 +1005,18 @@ async function openNew(agent: string, cwd: string): Promise<string> {
   return "ok";
 }
 
+// リモートの tmux セッションに attach する新規タブを開く。
+// これがあるとリモートのカードからも f(ジャンプ)が使えるようになる。
+async function openRemoteAttach(h: RemoteHost, tmuxSession: string): Promise<string> {
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const path = h.path ?? "$HOME/.local/bin";
+  // リモート側の PATH を通してから attach(非対話シェルは .bashrc を読まないため)
+  const inner = `export PATH=${path}:$PATH; tmux attach -t ${q(tmuxSession)}`;
+  const cmd = `ssh ${q(h.host)} -t ${q(inner)}`;
+  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT);
+  return "ok";
+}
+
 // ---------------------------------------------------------------- スラッシュコマンド一覧
 const CLAUDE_SLASH: [string, string][] = [
   ["/clear", "コンテキストをクリア"], ["/compact", "会話を要約して圧縮"], ["/cost", "コスト・使用量を表示"],
@@ -1110,7 +1122,8 @@ async function sshAttachments(): Promise<SshAttach[]> {
       break;
     }
     if (!host) continue;
-    const sess = cmd.match(/tmux\s+(?:attach|attach-session|a)\b[^\n]*?-t\s+([A-Za-z0-9_.-]+)/)?.[1] ?? "";
+    // -t の値はクォートされることがある('ops' / "ops" / ops)
+    const sess = cmd.match(/tmux\s+(?:attach|attach-session|a)\b[^\n]*?-t\s+['"]?([A-Za-z0-9_.-]+)['"]?/)?.[1] ?? "";
     list.push({ host, tmuxSession: sess, tty });
   }
   sshAttachCache = { at: Date.now(), list };
@@ -1485,13 +1498,26 @@ try {
       if (rm) {
         const s = remoteCacheList().find(x => x.key === cardKey);
         const localTty = s?.remote ? await localTtyForRemote(s.remote.host, s.remote.target) : null;
-        if (!localTty) return Response.json({ result: "error: no local ssh session" });
+        if (!localTty)
+          // 手元に attach が無い。UI 側でターミナルを開くか尋ねられるよう情報を返す
+          return Response.json({
+            result: "error: no local ssh session",
+            needAttach: { host: s?.remote?.host ?? "", tmuxSession: (s?.remote?.target ?? "").split(":")[0] },
+          });
         // 目的のペインを手元の tmux 表示にも切り替えてからフォーカスする
         if (s?.remote) await remoteSelectPane(rm.h, s.remote.paneId);
         return Response.json({ result: await focusTty(localTty) });
       }
       const r = await focusTty(tty);
       return Response.json({ result: r });
+    }
+    if (req.method === "POST" && url.pathname === "/api/remote-attach") {
+      const { host, tmuxSession } = await req.json();
+      const h = remoteHostOf(String(host ?? ""));
+      if (!h) return Response.json({ error: "unknown host" }, { status: 400 });
+      if (!/^[A-Za-z0-9_.-]+$/.test(String(tmuxSession ?? "")))
+        return Response.json({ error: "invalid tmux session" }, { status: 400 });
+      return Response.json({ result: await openRemoteAttach(h, String(tmuxSession)) });
     }
     if (req.method === "POST" && url.pathname === "/api/resume") {
       const { agent, sid, cwd, fork } = await req.json();

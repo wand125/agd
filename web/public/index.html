@@ -255,6 +255,22 @@
   </div>
 </div>
 
+<div id="attach-overlay" class="overlay">
+  <div id="attach-modal" class="modal" style="width:min(560px,92vw)">
+    <div class="modal-head"><span data-i18n="attach.title">Open a terminal for this session</span>
+      <button class="close" onclick="closeAttach()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;line-height:1.6" id="attach-msg"></div>
+      <pre id="attach-cmd" style="font-family:'SF Mono',Menlo,monospace;font-size:11.5px;background:#010409;border:1px solid var(--border);border-radius:6px;padding:8px 10px;overflow-x:auto;white-space:pre"></pre>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" onclick="closeAttach()" data-i18n="attach.cancel">Cancel</button>
+        <button class="btn" id="attach-go" style="border-color:var(--accent);color:var(--accent)" data-i18n-html="attach.open">Open terminal <kbd>⏎</kbd></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="help-overlay" class="overlay">
   <div id="help-modal" class="modal">
     <div class="modal-head"><span data-i18n="help.title">Keyboard shortcuts</span> <span style="font-size:11px;color:var(--dim)" data-i18n-html="help.close"><kbd>?</kbd> or <kbd>Esc</kbd> to close</span>

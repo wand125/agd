@@ -846,10 +846,11 @@ async function confirmEnter(key) {
 async function jump(key) {
   const s = sessionOf(key);
   if (!s) return;
-  // リモートでも、手元で ssh + tmux attach しているターミナルがあればそこへ飛べる
+  // リモートでも、手元で ssh + tmux attach しているターミナルがあればそこへ飛べる。
+  // 無ければ「開くか?」をモーダルで尋ねる(勝手にタブを増やさない)
   if (s.remote) {
     const r = await api("/api/focus", { cardKey: s.key });
-    if (!(r.result || "").startsWith("ok")) toast(t("toast.remoteNoJump", { host: s.remote.host }));
+    if (!(r.result || "").startsWith("ok")) openAttach(r.needAttach ?? { host: s.remote.host, tmuxSession: (s.remote.target || "").split(":")[0] });
     return;
   }
   if (!s.tty) { toast(t("toast.ttyJumpUnknown")); return; }
@@ -873,6 +874,28 @@ async function sendTo(key, input) {
   if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
   else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err: r.result })); }  // 失敗時は復元
 }
+
+
+// ---------------- リモート接続モーダル(f のジャンプ先が無いとき) ----------------
+let attachInfo = null;
+function openAttach(info) {
+  attachInfo = info;
+  $("attach-msg").innerHTML = t("attach.body", { host: esc(info.host) });
+  $("attach-cmd").textContent = `ssh ${info.host} -t 'tmux attach -t ${info.tmuxSession}'`;
+  $("attach-overlay").classList.add("show");
+  $("attach-go").focus();
+}
+function closeAttach() { $("attach-overlay").classList.remove("show"); attachInfo = null; }
+async function runAttach() {
+  if (!attachInfo) return;
+  const info = attachInfo;
+  closeAttach();
+  const r = await api("/api/remote-attach", info);
+  if ((r.result || "").startsWith("ok")) toast(t("attach.opened", { host: info.host }));
+  else toast(t("toast.launchFailed", { err: r.error || r.result }));
+}
+$("attach-go").onclick = runAttach;
+$("attach-overlay").onclick = (e) => { if (e.target === $("attach-overlay")) closeAttach(); };
 
 // ---------------- キーボード操作 ----------------
 function visibleCards() {
@@ -899,6 +922,11 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
     else if (e.key === "Enter") launchFromPalette();
     else if (e.key === "Escape" || e.key === "q") closeNew();
+    return;
+  }
+  if ($("attach-overlay").classList.contains("show")) {
+    if (e.key === "Enter") { e.preventDefault(); runAttach(); }
+    else if (e.key === "Escape" || e.key === "q") closeAttach();
     return;
   }
   if ($("help-overlay").classList.contains("show")) {
