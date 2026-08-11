@@ -61,16 +61,29 @@ export type RemotePane = {
   tty: string;           // /dev/pts/3
   cmd: string;           // claude / codex / bash
   cwd: string;
+  pid: number;           // ペインのシェルの pid(claude はこの子孫)
 };
 
 export async function remotePanes(h: RemoteHost): Promise<RemotePane[]> {
-  const fmt = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_tty}\t#{pane_current_command}\t#{pane_current_path}";
+  const fmt = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_tty}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_pid}";
   const out = await shRemote(h, `tmux list-panes -a -F '${fmt}' 2>/dev/null`);
   return out.trim().split("\n").filter(Boolean).flatMap(l => {
-    const [paneId, target, tty, cmd, cwd] = l.split("\t");
+    const [paneId, target, tty, cmd, cwd, pid] = l.split("\t");
     if (!paneId || !target) return [];
-    return [{ host: h.host, paneId, target, tty: tty ?? "", cmd: cmd ?? "", cwd: cwd ?? "" }];
+    return [{ host: h.host, paneId, target, tty: tty ?? "", cmd: cmd ?? "", cwd: cwd ?? "", pid: Number(pid) || 0 }];
   });
+}
+
+// pid → ppid の対応表。claude の pid からペインの pid まで遡って紐付ける。
+// 同一 cwd に複数セッションがある場合、cwd 突合では左右が入れ違うため必須。
+async function remotePpidMap(h: RemoteHost): Promise<Map<number, number>> {
+  const out = await shRemote(h, `ps -eo pid=,ppid= 2>/dev/null`);
+  const m = new Map<number, number>();
+  for (const l of out.split("\n")) {
+    const mm = l.trim().match(/^(\d+)\s+(\d+)$/);
+    if (mm) m.set(Number(mm[1]), Number(mm[2]));
+  }
+  return m;
 }
 
 // ---- セッション検出 ----
@@ -78,11 +91,26 @@ export async function remotePanes(h: RemoteHost): Promise<RemotePane[]> {
 type ClaudeAgent = { pid: number; cwd: string; sessionId: string; name: string; status: string; kind?: string };
 
 export async function remoteSessions(h: RemoteHost): Promise<Session[]> {
-  const [panes, agentsRaw] = await Promise.all([
+  const [panes, agentsRaw, ppid] = await Promise.all([
     remotePanes(h),
     shRemote(h, `claude agents --json 2>/dev/null`),
+    remotePpidMap(h),
   ]);
   if (!panes.length) return [];
+
+  // claude の pid から祖先を辿り、どのペインに属するかを決める
+  const paneByPid = new Map(panes.map(p => [p.pid, p]));
+  const paneOfPid = (pid: number): RemotePane | undefined => {
+    let cur = pid;
+    for (let i = 0; i < 12 && cur > 1; i++) {
+      const p = paneByPid.get(cur);
+      if (p) return p;
+      const next = ppid.get(cur);
+      if (!next || next === cur) break;
+      cur = next;
+    }
+    return undefined;
+  };
 
   let agents: ClaudeAgent[] = [];
   try {
@@ -94,11 +122,13 @@ export async function remoteSessions(h: RemoteHost): Promise<Session[]> {
   const out: Session[] = [];
   const usedPane = new Set<string>();
 
-  // claude は sessionId が取れるので、同じ cwd のペインに割り当てる。
-  // 同一 cwd に複数ペインがある場合は先着順(agents 側の順序を尊重)。
+  // claude の pid からペインを特定する。cwd 突合だと同一プロジェクトで
+  // 複数セッションを開いた際に画面とログが入れ違うため、pid の親子関係を使う。
   for (const a of agents) {
-    const pane = panes.find(p => !usedPane.has(p.paneId) && p.cwd === a.cwd && /^(claude|node)$/.test(p.cmd));
-    if (!pane) continue;
+    const pane = paneOfPid(a.pid)
+      // pid で辿れない場合のみ cwd で代替(ps が使えない環境向け)
+      ?? panes.find(p => !usedPane.has(p.paneId) && p.cwd === a.cwd && /^(claude|node)$/.test(p.cmd));
+    if (!pane || usedPane.has(pane.paneId)) continue;
     usedPane.add(pane.paneId);
     out.push({
       key: `claude:${a.sessionId}@${h.host}`,
