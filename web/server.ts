@@ -1157,8 +1157,12 @@ try {
     const noCache = { "Cache-Control": "no-store" };
     if (url.pathname === "/" || url.pathname === "/index.html")
       return new Response(Bun.file(INDEX_HTML), { headers: noCache });
-    if (url.pathname === "/app.js")
-      return new Response(Bun.file(join(import.meta.dir, "public", "app.js")), { headers: noCache });
+    // フロントの JS はいずれも no-store(更新が即反映されないと調査が難しくなる)。
+    // パスは許可リストで固定し、任意のファイルを読ませない。
+    if (url.pathname === "/app.js" || url.pathname === "/i18n.js") {
+      const name = url.pathname === "/app.js" ? "app.js" : "i18n.js";
+      return new Response(Bun.file(join(import.meta.dir, "public", name)), { headers: noCache });
+    }
     if (url.pathname === "/favicon.ico")
       return new Response(Bun.file(join(import.meta.dir, "public", "favicon.ico")));
     if (url.pathname === "/favicon-256.png")

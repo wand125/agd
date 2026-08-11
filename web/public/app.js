@@ -1,5 +1,6 @@
 // agd web frontend
 const $ = (id) => document.getElementById(id);
+applyStaticI18n();
 let sessions = [];
 let detailKey = null;
 let logTimer = null;
@@ -30,8 +31,8 @@ function togglePin(key) {
   const s = sessionOf(key);
   const label = s ? maskText(s.name) : key;
   const i = pinned.indexOf(key);
-  if (i >= 0) { pinned.splice(i, 1); toast(`📌 解除: ${label}`); }
-  else { pinned.push(key); toast(`📌 ピン留め: ${label}`); }
+  if (i >= 0) { pinned.splice(i, 1); toast(t("toast.unpinned", { name: label })); }
+  else { pinned.push(key); toast(t("toast.pinned", { name: label })); }
   savePinned();
   followSelection();
   render();
@@ -40,24 +41,24 @@ function togglePin(key) {
 function moveCard(key, delta) {
   const list = orderedFiltered();
   const idx = list.findIndex(s => s.key === key);
-  if (idx < 0) { toast("カードが選択されていません"); return; }
+  if (idx < 0) { toast(t("toast.noCardSelected")); return; }
   const vertical = Math.abs(delta) > 1;
-  const dirLabel = vertical ? (delta < 0 ? "上" : "下") : (delta < 0 ? "前" : "後ろ");
+  const dirLabel = vertical ? (delta < 0 ? t("dir.up") : t("dir.down")) : (delta < 0 ? t("dir.prev") : t("dir.next"));
   const cur = list[idx], nb = list[idx + delta];
-  if (!nb) { toast(delta < 0 ? "すでに先頭側です" : "すでに末尾側です"); return; }
+  if (!nb) { toast(delta < 0 ? t("toast.atStart") : t("toast.atEnd")); return; }
   const curPinned = pinned.includes(cur.key), nbPinned = pinned.includes(nb.key);
   if (curPinned && nbPinned) {
     // ピン同士 → ピン順を入れ替え
     const i = pinned.indexOf(cur.key), j = pinned.indexOf(nb.key);
     [pinned[i], pinned[j]] = [pinned[j], pinned[i]];
     savePinned();
-    toast(`📌 ${dirLabel}へ`);
+    toast(t("toast.movedTo", { dir: dirLabel }));
   } else if (curPinned !== nbPinned) {
-    toast("📌 ピン領域の境界です(p でピン状態を揃えると跨げます)");
+    toast(t("toast.pinBoundary"));
   } else {
     const a = cardOrder.indexOf(cur.key), b = cardOrder.indexOf(nb.key);
     if (a >= 0 && b >= 0) { [cardOrder[a], cardOrder[b]] = [cardOrder[b], cardOrder[a]]; saveCardOrder(); }
-    toast(`↔ カードを${dirLabel}へ`);
+    toast(t("toast.cardMovedTo", { dir: dirLabel }));
   }
   followSelection();
   render();
@@ -92,7 +93,7 @@ function esc(t) { return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
 // 決定的スクランブル: 英字→英字・数字→数字・CJK→ダミー漢字。空白/記号/罫線は保持するので
 // レイアウトと ANSI カラーはそのまま、内容だけが読めなくなる。:mask で切替
 let maskMode = localStorage.getItem("agd-mask") === "1";
-const MASK_CJK = ["内", "容", "秘", "匿", "伏", "字", "例", "文", "何", "処"];
+const MASK_CJK = ["\u5185", "\u5bb9", "\u79d8", "\u533f", "\u4f0f", "\u5b57", "\u4f8b", "\u6587", "\u4f55", "\u51e6"];
 function maskText(t) {
   if (!maskMode || !t) return t;
   let out = "";
@@ -112,14 +113,14 @@ function toggleMask() {
   document.querySelectorAll(".screen").forEach(el => delete el.dataset.raw);  // 画面キャッシュ無効化
   render();
   if (detailKey) renderLog(false);
-  toast(maskMode ? "🎭 マスクモード ON(:mask で解除)" : "マスクモード OFF");
+  toast(maskMode ? t("toast.maskOn") : t("toast.maskOff"));
 }
 // エスケープ済みテキスト内の URL をリンク化(新しいタブで開く)。末尾の句読点や括弧は除外
 function linkify(escaped) {
   // 日本語(かな・漢字・全角記号)はURL境界とみなして打ち切る
-  return escaped.replace(/(https?:\/\/[^\s<>"'　-ヿ一-鿿＀-￯]+)/g, (m) => {
+  return escaped.replace(/(https?:\/\/[^\s<>"'\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]+)/g, (m) => {
     // 末尾の句読点・括弧・Markdown記号(** など)はURLに含めない
-    const url = m.replace(/[)\]}.,;:。、」』>*_`]+$/, "");
+    const url = m.replace(/[)\]}.,;:\u3002\u3001\u300d\u300f>*_`]+$/, "");
     return `<a href="${url}" target="_blank" rel="noopener">${url}</a>${m.slice(url.length)}`;
   });
 }
@@ -200,7 +201,7 @@ async function api(path, body) {
 let toastTimer = null;
 function toast(msg) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
-  const t = document.createElement("div");
+  const t = document.createElement('div');
   t.className = "toast"; t.textContent = msg;
   document.body.appendChild(t);
   clearTimeout(toastTimer);
@@ -219,7 +220,7 @@ function connect() {
       (msg.changes || []).forEach(handleChange);
     }
   };
-  ws.onclose = () => { $("stats").textContent = "切断 — 再接続中…"; setTimeout(connect, 2000); };
+  ws.onclose = () => { $("stats").textContent = t("stats.disconnected"); setTimeout(connect, 2000); };
 }
 connect();
 
@@ -254,7 +255,7 @@ $("mac-notify-toggle").onchange = (e) => api("/api/config", { macNotify: e.targe
 function handleChange(c) {
   if (!$("notify-toggle").checked) return;
   if (c.from === "busy" && (c.to === "waiting" || c.to === "idle")) {
-    const label = c.to === "waiting" ? "入力待ち" : "完了";
+    const label = c.to === "waiting" ? t("notify.waiting") : t("notify.done");
     const n = new Notification(`${c.name} — ${label}`, { body: `${c.agent} / ${label}`, tag: c.key });
     n.onclick = () => { window.focus(); if (c.tty) api("/api/focus", { tty: c.tty }); };
   }
@@ -312,13 +313,13 @@ function render() {
         kbdKey = hit.key;
         pendingSelect = null;
         followSelection();
-        toast("新しいセッションに選択を移しました");
+        toast(t("toast.selectionMoved"));
       }
     }
   }
   const counts = { waiting: 0, busy: 0, idle: 0 };
   all.forEach(s => counts[s.status] = (counts[s.status] ?? 0) + 1);
-  $("stats").textContent = `▲ ${counts.waiting} · ● ${counts.busy} · ○ ${counts.idle}`;
+  $("stats").textContent = t("stats.counts", counts);
   $("tab-grid-badge").textContent = counts.waiting ? `▲${counts.waiting}` : "";
   document.title = (counts.waiting ? `(${counts.waiting}) ` : "") + "agd — Agent Dashboard";
   if (activeTab === "grid") renderGrid();
@@ -382,7 +383,7 @@ function renderGrid() {
     sum.style.display = s.summary ? "" : "none";
     renderPromptBar(el.querySelector(".prompt-bar"), s);
     const scr = el.querySelector(".screen");
-    if (setScreen(scr, s.screen ?? "(画面を取得できません)")) {
+    if (setScreen(scr, s.screen ?? t("card.screenUnavailable"))) {
       if (!screenScrolled.has(s.key)) scr.scrollTop = scr.scrollHeight;
     }
     el.querySelector(".latest-btn").style.display = screenScrolled.has(s.key) ? "" : "none";
@@ -393,28 +394,28 @@ function renderGrid() {
 }
 
 function buildCard(key) {
-  const el = document.createElement("div");
+  const el = document.createElement('div');
   el.dataset.key = key;
   el.innerHTML = `
     <div class="card-head">
       <span class="dot"></span><span class="agent-tag"></span><span class="proj-tag"></span>
       <span class="card-title"></span>
       <span class="git-badge"></span><span class="card-meta"></span>
-      <button class="jump-btn pin-move pin-left" title="カードを前へ (⇧H)">◀</button>
-      <button class="jump-btn pin-move pin-up" title="カードを上へ (⇧K)">▲</button>
-      <button class="jump-btn pin-move pin-down" title="カードを下へ (⇧J)">▼</button>
-      <button class="jump-btn pin-move pin-right" title="カードを後ろへ (⇧L)">▶</button>
-      <button class="jump-btn pin-btn" title="ピン留め(このセッションを先頭に固定)">📌</button>
-      <button class="jump-btn detail-btn" title="詳細ログを開く">⤢</button>
-      <button class="jump-btn go-btn" title="ターミナルへジャンプ">⌖</button>
+      <button class="jump-btn pin-move pin-left" title="${t("card.moveLeft")}">◀</button>
+      <button class="jump-btn pin-move pin-up" title="${t("card.moveUp")}">▲</button>
+      <button class="jump-btn pin-move pin-down" title="${t("card.moveDown")}">▼</button>
+      <button class="jump-btn pin-move pin-right" title="${t("card.moveRight")}">▶</button>
+      <button class="jump-btn pin-btn" title="${t("card.pin")}">📌</button>
+      <button class="jump-btn detail-btn" title="${t("card.detail")}">⤢</button>
+      <button class="jump-btn go-btn" title="${t("card.jump")}">⌖</button>
     </div>
     <div class="card-summary" style="display:none"></div>
     <div class="prompt-bar" style="display:none"></div>
     <div class="screen-wrap">
       <div class="screen"></div>
-      <button class="latest-btn">↓ 最新</button>
+      <button class="latest-btn">${t("card.latest")}</button>
     </div>
-    <div class="send-row"><textarea rows="1" placeholder="⏎送信 / ⇧⏎改行"></textarea></div>`;
+    <div class="send-row"><textarea rows="1" placeholder="${t("card.sendPlaceholder")}"></textarea></div>`;
   el.querySelector(".pin-btn").onclick = (e) => { e.stopPropagation(); togglePin(el.dataset.key); };
   el.querySelector(".pin-left").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, -1); };
   el.querySelector(".pin-right").onclick = (e) => { e.stopPropagation(); moveCard(el.dataset.key, 1); };
@@ -474,15 +475,16 @@ function renderList() {
 
 // ---------------- スラッシュコマンドヒント(送信欄で / を打つと表示) ----------------
 const INTERNAL_CMDS = [
-  { cmd: "q", desc: "選択セッションを終了(実行中)/ 非表示(履歴)" },
-  { cmd: "show", desc: "非表示にした履歴を全て再表示" },
-  { cmd: "new", desc: "新規セッションパレットを開く" },
-  { cmd: "esc", desc: "選択セッションに Esc(中断)を送信" },
-  { cmd: "mode", desc: "選択セッションに ⇧Tab(モード切替)を送信" },
-  { cmd: "key ", desc: "任意キー送信 (Up/Down/Left/Right/Tab/ShiftTab/Enter/Escape)" },
-  { cmd: "mask", desc: "マスクモード切替(スクリーンショット用に内容をスクランブル)" },
-  { cmd: "sum", desc: "選択セッションの1行要約を今すぐ更新" },
-  { cmd: "/", desc: "スラッシュコマンドを選択セッションへ送信" },
+  { cmd: "q", descKey: "cmd.q" },
+  { cmd: "show", descKey: "cmd.show" },
+  { cmd: "new", descKey: "cmd.new" },
+  { cmd: "esc", descKey: "cmd.esc" },
+  { cmd: "mode", descKey: "cmd.mode" },
+  { cmd: "key ", descKey: "cmd.key" },
+  { cmd: "mask", descKey: "cmd.mask" },
+  { cmd: "sum", descKey: "cmd.sum" },
+  { cmd: "/", descKey: "cmd.slash" },
+  { cmd: "lang ", descKey: "cmd.lang" },
 ];
 const slashCache = new Map(); // "agent|cwd" → [{cmd, desc}]
 async function slashList(s) {
@@ -502,12 +504,12 @@ function renderHints() {
   const p = $("hint-panel");
   const { input, items, sel } = hintState;
   p.innerHTML = items.map((c, i) =>
-    `<div class="hint-row ${i === sel ? "sel" : ""}"><span class="cmd">${esc(c.cmd)}</span><span class="desc">${esc(c.desc)}</span></div>`).join("");
+    `<div class="hint-row ${i === sel ? "sel" : ""}"><span class="cmd">${esc(c.cmd)}</span><span class="desc">${esc(c.descKey ? t(c.descKey) : c.desc)}</span></div>`).join("");
   [...p.children].forEach((row, i) => {
     row.onmousedown = (ev) => {
       ev.preventDefault();
       input.value = items[i].cmd.trimEnd() + " ";
-      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(new Event('input'));
       input.focus();
     };
   });
@@ -541,7 +543,7 @@ function handleHintKeys(e, input) {
   if (e.key === "Tab") {
     e.preventDefault();
     input.value = hintState.items[hintState.sel].cmd.trimEnd() + " ";
-    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new Event('input'));
     return true;
   }
   if (e.key === "Enter") {
@@ -570,7 +572,7 @@ function openCmdline() {
   $("cmdline").style.display = "flex";
   $("cmd-input").value = "";
   $("cmd-input").focus();
-  $("cmd-input").dispatchEvent(new Event("input"));  // 内部コマンド一覧を最初から表示
+  $("cmd-input").dispatchEvent(new Event('input'));  // 内部コマンド一覧を最初から表示
 }
 function closeCmdline() {
   if ($("cmdline").style.display === "none") return;  // blur ハンドラとの再入防止
@@ -604,68 +606,90 @@ function curSelKey() {
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
 async function sendNamedKey(k, label) {
   const s = sessionOf(curSelKey());
-  if (!s?.running || !s.tty) { toast("実行中のセッションを選択してください"); return; }
+  if (!s?.running || !s.tty) { toast(t("toast.selectRunning")); return; }
   const r = await api("/api/key", { tty: s.tty, key: k });
-  if ((r.result || "").startsWith("ok")) toast(`${label} → ${s.name}`);
-  else toast("送信失敗: " + r.result);
+  if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: label, name: s.name }));
+  else toast(t("toast.sendFailed", { err: r.result }));
 }
 // 選択セッションへテキスト送信(スラッシュコマンド用)
 async function sendTextToSelected(text) {
   const s = sessionOf(curSelKey());
-  if (!s?.running || !s.tty) { toast("実行中のセッションを選択してください"); return; }
+  if (!s?.running || !s.tty) { toast(t("toast.selectRunning")); return; }
   const r = await api("/api/send", { tty: s.tty, text });
-  if ((r.result || "").startsWith("ok")) toast(`${text} → ${s.name}`);
-  else toast("送信失敗: " + r.result);
+  if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: text, name: s.name }));
+  else toast(t("toast.sendFailed", { err: r.result }));
 }
 async function runCommand(c) {
   if (c === "q") {
     const selKey = curSelKey();
     const s = sessionOf(selKey);
-    if (!s) { toast(":q — セッションが選択されていません"); return; }
+    if (!s) { toast(t("toast.qNoSession")); return; }
     const viewing = detailKey === selKey && $("overlay").classList.contains("show");
     if (s.running) {
-      if (!s.tty) { toast("tty不明のため終了できません"); return; }
+      if (!s.tty) { toast(t("toast.ttyCloseUnknown")); return; }
       closing.add(s.key);
       render();
       const r = await api("/api/close", { tty: s.tty });
       if ((r.result || "").startsWith("ok")) {
-        toast(`✕ ${s.name} を終了しました`);
+        toast(t("toast.closed", { name: s.name }));
         if (viewing) closeDetail();  // 表示中のセッションを終了したらポップアップも閉じる
       }
-      else { closing.delete(s.key); render(); toast("終了失敗: " + r.result); }
+      else { closing.delete(s.key); render(); toast(t("toast.closeFailed", { err: r.result })); }
     } else {
       archived.add(s.key);
       saveArchived();
       render();
-      toast(`${s.name} を一覧から非表示にしました(:show で全再表示)`);
+      toast(t("toast.hidden", { name: s.name }));
     }
   } else if (c === "show") {
     archived.clear();
     saveArchived();
     render();
-    toast("非表示にしたセッションを再表示しました");
+    toast(t("toast.shown"));
   } else if (c === "new") {
     openNew();
   } else if (c === "mask") {
     toggleMask();
   } else if (c === "sum") {
     const key = curSelKey();
-    if (!key) { toast(":sum — セッションが選択されていません"); return; }
-    api("/api/summarize", { key }).then(() => toast("要約を実行中…(数秒後に反映)"));
+    if (!key) { toast(t("toast.sumNoSession")); return; }
+    api("/api/summarize", { key }).then(() => toast(t("toast.summarizing")));
   } else if (c.startsWith("/")) {
     // スラッシュコマンドを選択セッションへそのまま送信(:/clear など)
     sendTextToSelected(c);
   } else if (c === "esc") {
-    sendNamedKey("Escape", "Esc(中断)");
+    sendNamedKey("Escape", t("action.interrupt"));
   } else if (c === "mode") {
-    sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
+    sendNamedKey("ShiftTab", t("action.mode"));
   } else if (c.startsWith("key ")) {
     const k = c.slice(4).trim();
     const valid = ["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab"];
     if (valid.includes(k)) sendNamedKey(k, k);
-    else toast(`不明なキー: ${k}(使用可: ${valid.join(" ")})`);
+    else toast(t("toast.invalidKey", { key: k, valid: valid.join(" ") }));
+  } else if (c === "lang" || c.startsWith("lang ")) {
+    const next = c.slice(4).trim();
+    if (next === "en" || next === "ja") {
+      setLang(next);
+      toast(t("toast.langChanged"));
+      $("grid").replaceChildren();
+      render();
+      if (detailKey) {
+        const s = sessionOf(detailKey);
+        if (s) {
+          $("d-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)}`;
+          setScreen($("d-screen"), s.screen ?? t("detail.screenUnavailable"));
+          renderPromptBar($("d-prompt"), s);
+          loadSubagents(s);
+        }
+        $("d-kbd-hint").innerHTML = $("d-input") === document.activeElement ? t("hint.detailInsert") : t("hint.detailScroll");
+        renderLog(false);
+      }
+      if ($("new-overlay").classList.contains("show")) renderNewList();
+    } else {
+      toast(t("toast.currentLang", { lang: getLang() }));
+    }
   } else if (c) {
-    toast(`未対応コマンド: :${c}(使用可: q / show / new / mask / esc / mode / key <K> / /<cmd>)`);
+    toast(t("toast.unknownCommand", { cmd: c }));
   }
 }
 
@@ -675,11 +699,11 @@ async function resumeSession(s) {
   resumeBusy = true;
   await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
   resumeBusy = false;
-  toast(`▶ ${s.agent} セッションを新しいタブで resume しました`);
+  toast(t("toast.resumed", { agent: s.agent }));
 }
 
 function buildRow(s, running) {
-  const row = document.createElement("div");
+  const row = document.createElement('div');
   row.className = "resume-row" + (closing.has(s.key) ? " closing" : "");
   row.dataset.key = s.key;
   row.innerHTML = `
@@ -695,16 +719,16 @@ function buildRow(s, running) {
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
-  row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${s.status} · ${fmtAge(s.ageS)}`;
-  const btns = document.createElement("span");
+  row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)} · ${fmtAge(s.ageS)}`;
+  const btns = document.createElement('span');
   btns.className = "row-btns";
   if (running) {
-    btns.innerHTML = `<button class="btn">ログ</button> <button class="btn">⌖</button>`;
+    btns.innerHTML = `<button class="btn">${t("row.log")}</button> <button class="btn">⌖</button>`;
     const [logBtn, jumpBtn] = btns.querySelectorAll("button");
     logBtn.onclick = () => openDetail(s.key);
     jumpBtn.onclick = () => jump(s.key);
   } else {
-    btns.innerHTML = `<button class="btn">ログ</button> <button class="btn">resume</button>`;
+    btns.innerHTML = `<button class="btn">${t("row.log")}</button> <button class="btn">${t("row.resume")}</button>`;
     const [logBtn, resumeBtn] = btns.querySelectorAll("button");
     logBtn.onclick = () => openDetail(s.key);
     resumeBtn.onclick = () => resumeSession(s);
@@ -744,7 +768,7 @@ function renderPromptBar(bar, s) {
   } else {
     html += `<button class="btn" data-mode="key" data-key="Up">↑</button>
              <button class="btn" data-mode="key" data-key="Down">↓</button>
-             <button class="btn" data-mode="key" data-key="Enter">⏎ 確定</button>
+             <button class="btn" data-mode="key" data-key="Enter">${t("prompt.confirm")}</button>
              <button class="btn" data-mode="key" data-key="Escape">Esc</button>
              <button class="btn" data-mode="key" data-key="y">y</button>
              <button class="btn" data-mode="key" data-key="n">n</button>`;
@@ -764,8 +788,8 @@ function renderPromptBar(bar, s) {
       } else {
         r = await api("/api/key", { tty: s.tty, key: b.dataset.key });
       }
-      if ((r.result || "").startsWith("ok")) toast("送信しました");
-      else toast("送信失敗: " + r.result);
+      if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
+      else toast(t("toast.sendFailed", { err: r.result }));
     };
   });
 }
@@ -776,7 +800,7 @@ function renderPromptBar(bar, s) {
 function answerByCursor(s, n) {
   const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
   const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-  api("/api/key", { tty: s.tty, keys }).then(() => toast(`選択肢 ${n} を確定しました`));
+  api("/api/key", { tty: s.tty, keys }).then(() => toast(t("toast.optionConfirmed", { n })));
 }
 function answerPromptByNumber(sessKey, n) {
   const s = sessionOf(sessKey);
@@ -785,7 +809,7 @@ function answerPromptByNumber(sessKey, n) {
   if (n > count) return false;
   if (s.prompt.kind === "numbered" && s.agent === "claude") {
     // claude の番号付きプロンプトは数字キーで直接選択できる
-    api("/api/key", { tty: s.tty, key: String(n) }).then(() => toast(`「${n}」を送信しました`));
+    api("/api/key", { tty: s.tty, key: String(n) }).then(() => toast(t("toast.numberSent", { n })));
     return true;
   }
   // codex の番号付き・両者のカーソル型はカーソル移動+Enter で確定
@@ -797,19 +821,19 @@ let confirmBusy = false;
 async function confirmEnter(key) {
   const s = sessionOf(key);
   if (!s || !s.tty || confirmBusy) return;
-  if (s.status !== "waiting") { toast("入力待ちではないため ⏎ は送信しません"); return; }
+  if (s.status !== "waiting") { toast(t("toast.notWaiting")); return; }
   confirmBusy = true;
   try {
     const r = await api("/api/key", { tty: s.tty, key: "Enter" });
-    if ((r.result || "").startsWith("ok")) toast("⏎ を送信しました(確定)");
-    else toast("送信失敗: " + r.result);
+    if ((r.result || "").startsWith("ok")) toast(t("toast.enterSent"));
+    else toast(t("toast.sendFailed", { err: r.result }));
   } finally { confirmBusy = false; }
 }
 
 async function jump(key) {
   const s = sessionOf(key);
   if (!s) return;
-  if (!s.tty) { toast("ttyが不明のためジャンプできません"); return; }
+  if (!s.tty) { toast(t("toast.ttyJumpUnknown")); return; }
   await api("/api/focus", { tty: s.tty });
 }
 // textarea の自動リサイズ(改行で上に伸びる)
@@ -821,14 +845,14 @@ async function sendTo(key, input) {
   const s = sessionOf(key);
   const text = input.value.replace(/\s+$/, "");  // 末尾の空白改行だけ除去(内部改行は保持)
   if (!s || !text.trim() || input.dataset.busy) return;  // 送信中の再入を防ぐ
-  if (!s.tty) { toast("ttyが不明のため送信できません"); return; }
+  if (!s.tty) { toast(t("toast.ttySendUnknown")); return; }
   input.dataset.busy = "1";
   input.value = "";                          // 先にクリアして二重送信を防止
   autoGrow(input, 140);
   const r = await api("/api/send", { tty: s.tty, text });
   delete input.dataset.busy;
-  if ((r.result || "").startsWith("ok")) toast("送信しました");
-  else { input.value = text; autoGrow(input, 140); toast("送信失敗: " + r.result); }  // 失敗時は復元
+  if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
+  else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err: r.result })); }  // 失敗時は復元
 }
 
 // ---------------- キーボード操作 ----------------
@@ -879,8 +903,8 @@ document.addEventListener("keydown", (e) => {
     else if (e.ctrlKey && (e.key === "n" || e.key === "N") && detailKey) { e.preventDefault(); duplicateSession(detailKey); }
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey) { e.preventDefault(); resumeContinue(detailKey); }
     else if (e.key === "f" && detailKey) jump(detailKey);
-    else if (e.key === "s" && detailKey) sendNamedKey("Escape", "Esc(中断)");
-    else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
+    else if (e.key === "s" && detailKey) sendNamedKey("Escape", t("action.interrupt"));
+    else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", t("action.mode"));
     else if (e.key === ":") { e.preventDefault(); openCmdline(); }
     else if (e.key === "Escape" || e.key === "q") closeDetail();
     return;
@@ -911,8 +935,8 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "o" && s) openDetail(listKey);
     else if (e.key === "f" && s?.running) jump(listKey);
     else if (e.key === "Enter" && s) { s.running ? confirmEnter(listKey) : resumeSession(s); }
-    else if (e.key === "m" && s?.running) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
-    else if (e.key === "s" && s?.running) sendNamedKey("Escape", "Esc(中断)");
+    else if (e.key === "m" && s?.running) sendNamedKey("ShiftTab", t("action.mode"));
+    else if (e.key === "s" && s?.running) sendNamedKey("Escape", t("action.interrupt"));
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && s) { e.preventDefault(); resumeContinue(listKey); }
     else if (/^[1-9]$/.test(e.key) && s?.running) answerPromptByNumber(listKey, Number(e.key));
     else if (e.key === "p" && s) togglePin(listKey);
@@ -986,8 +1010,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.ctrlKey && (e.key === "n" || e.key === "N")) { e.preventDefault(); duplicateSession(kbdKey); }
   else if (e.ctrlKey && (e.key === "c" || e.key === "C")) { e.preventDefault(); resumeContinue(kbdKey); }
   else if (e.key === "n") { e.preventDefault(); openNew(); }
-  else if (e.key === "m" && kbdKey) sendNamedKey("ShiftTab", "⇧Tab(モード切替)");
-  else if (e.key === "s" && kbdKey) sendNamedKey("Escape", "Esc(中断)");
+  else if (e.key === "m" && kbdKey) sendNamedKey("ShiftTab", t("action.mode"));
+  else if (e.key === "s" && kbdKey) sendNamedKey("Escape", t("action.interrupt"));
   else if (e.key === "p" && kbdKey) togglePin(kbdKey);
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
   else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
@@ -1027,7 +1051,7 @@ async function openDetail(key) {
   $("overlay").classList.add("show");
   $("d-agent").textContent = s.agent;
   $("d-title").textContent = maskText(s.name);
-  $("d-meta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
+  $("d-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)}`;
   $("d-dot").style.background = getComputedStyle(document.documentElement).getPropertyValue(`--${s.status}`) || "#666";
   detailScrolled = false;
   detailSel = -1;
@@ -1037,14 +1061,14 @@ async function openDetail(key) {
   $("d-sub").value = "";
   loadSubagents(s);
   $("d-latest").style.display = "none";
-  setScreen($("d-screen"), s.screen ?? "(実行中でないため画面はありません)");
+  setScreen($("d-screen"), s.screen ?? t("detail.screenUnavailable"));
   $("d-screen").scrollTop = $("d-screen").scrollHeight;
   $("d-input").dataset.tty = s.tty ?? "";
   $("d-jump").style.display = s.tty ? "" : "none";
   $("d-jump").onclick = () => jump(key);
   renderPromptBar($("d-prompt"), s);
   $("d-input").blur();  // デフォルトはスクロールモード。i で入力モードへ
-  $("d-kbd-hint").innerHTML = D_HINT_SCROLL;
+  $("d-kbd-hint").innerHTML = t("hint.detailScroll");
   await loadLog(s, true);
   clearInterval(logTimer);
   logTimer = setInterval(() => {
@@ -1117,7 +1141,7 @@ async function loadSubagents(s) {
     const sel = $("d-sub");
     if (!subagents.length) { sel.style.display = "none"; return; }
     const cur = sel.value;
-    sel.innerHTML = `<option value="">本体</option>` + subagents.map(a =>
+    sel.innerHTML = `<option value="">${t("detail.main")}</option>` + subagents.map(a =>
       `<option value="${esc(a.id)}">${a.active ? "● " : ""}sub: ${esc(maskText(a.name))}</option>`).join("");
     sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
     sel.style.display = "";
@@ -1166,15 +1190,15 @@ function renderLog(force) {
   const log = $("detail-log");
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   const older = logStart > 0
-    ? `<div class="load-older" onclick="loadOlder()">▲ さらに読み込む(残り ${logStart} 件)</div>` : "";
+    ? `<div class="load-older" onclick="loadOlder()">${t("detail.loadOlderCount", { n: logStart })}</div>` : "";
   log.innerHTML = older + logEntries.map((e0, idx) => {
     const e = maskMode ? { ...e0, text: maskText(e0.text) } : e0;
     const ts = e.ts ? `<span class="ts">${e.ts.slice(11, 19)}</span> ` : "";
     if (e.role === "user") return `<div class="entry user">${ts}${linkify(esc(e.text))}</div>`;
     if (e.role === "assistant") return `<div class="entry assistant">${ts}${linkify(esc(e.text))}</div>`;
-    const label = e.role === "thinking" ? "💭 思考" : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : "📄 結果";
+    const label = e.role === "thinking" ? t("detail.thinking") : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : t("detail.result");
     const body = e.role === "tool_use" ? renderToolUse(e) : linkify(esc(e.text));
-    const more = e.truncated ? `<div class="load-full" data-i="${idx}">…全文を表示(${TRUNCATE_LABEL})</div>` : "";
+    const more = e.truncated ? `<div class="load-full" data-i="${idx}">${t("detail.showFull", { limit: t("detail.truncateLabel") })}</div>` : "";
     return `<div class="entry ${e.role}"><details${detailOpen.has(idx) ? " open" : ""}><summary>${ts}${label}</summary><pre>${body}</pre>${more}</details></div>`;
   }).join("");
   // クリック選択・マウス開閉の同期・全文展開
@@ -1200,7 +1224,6 @@ function renderLog(force) {
   updateDetailSel(false);
   if (force || nearBottom) log.scrollTop = log.scrollHeight;
 }
-const TRUNCATE_LABEL = "4000字で省略中";
 function closeDetail() {
   $("overlay").classList.remove("show");
   detailKey = null;
@@ -1215,15 +1238,15 @@ async function sendDetail() {
   const tty = $("d-input").dataset.tty;
   const text = $("d-input").value.replace(/\s+$/, "");
   if (!text) { if (detailKey) confirmEnter(detailKey); return; }
-  if (!tty) { toast("実行中でないセッションには送信できません(resumeしてください)"); return; }
+  if (!tty) { toast(t("toast.detailNotRunning")); return; }
   if (detailSendBusy) return;                // 送信中の再入を防ぐ
   detailSendBusy = true;
   $("d-input").value = "";                   // 先にクリアして二重送信を防止
   autoGrow($("d-input"), 200);
   const r = await api("/api/send", { tty, text });
   detailSendBusy = false;
-  if ((r.result || "").startsWith("ok")) toast("送信しました");
-  else { $("d-input").value = text; autoGrow($("d-input"), 200); toast("送信失敗: " + r.result); }
+  if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
+  else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err: r.result })); }
 }
 $("d-input").oninput = () => { updateSlashHints($("d-input"), () => sessionOf(detailKey)); autoGrow($("d-input"), 200); };
 $("d-input").onkeydown = (e) => {
@@ -1238,34 +1261,32 @@ $("d-input").onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDetail(); }  // ⇧⏎ は改行
   if (e.key === "Escape") $("d-input").blur();  // スクロールモードへ(閉じるのは q/Esc)
 };
-const D_HINT_SCROLL = "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>⏎</kbd>開閉 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>s</kbd>中断 <kbd>^N</kbd>複製 <kbd>^C</kbd>引継 <kbd>:</kbd>cmd <kbd>q</kbd>閉じる";
-const D_HINT_INSERT = "<kbd>⏎</kbd>送信 <kbd>⇧⏎</kbd>改行 <kbd>Esc</kbd>スクロールモードへ";
-$("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = D_HINT_INSERT; };
-$("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = D_HINT_SCROLL; };
+$("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = t("hint.detailInsert"); };
+$("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = t("hint.detailScroll"); };
 
 // ---------------- ログ横断検索 ----------------
 async function runSearch(q) {
   $("search-overlay").classList.add("show");
   $("search-q").textContent = q;
-  $("search-results").innerHTML = "検索中…";
+  $("search-results").textContent = t("search.searching");
   const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
   const { hits, indexing } = await r.json();
-  if (!hits.length) { $("search-results").innerHTML = "ヒットなし"; return; }
+  if (!hits.length) { $("search-results").textContent = t("search.noHits"); return; }
   $("search-results").innerHTML = "";
   if (indexing) {
-    const note = document.createElement("div");
+    const note = document.createElement('div');
     note.className = "card-meta";
-    note.textContent = `⏳ 全文インデックス構築中 (${indexing.done}/${indexing.total}) — 完了までは簡易検索の結果です`;
+    note.textContent = t("search.indexing", { done: indexing.done, total: indexing.total });
     $("search-results").appendChild(note);
   }
   hits.forEach(h => {
-    const row = document.createElement("div");
+    const row = document.createElement('div');
     row.className = "hit-row";
     row.innerHTML = `
       <span class="agent-tag">${h.agent}</span>
       <span class="proj-tag" style="background:${projColor(h.cwd)}">${esc(projName(h.cwd))}</span>
       <strong></strong>
-      <span class="card-meta"> ${h.count}件 · ${fmtAge(Math.floor((Date.now() - h.mtime) / 1000))}</span>
+      <span class="card-meta"> ${t("search.hits", { n: h.count })} · ${fmtAge(Math.floor((Date.now() - h.mtime) / 1000))}</span>
       <div class="snippet"></div>`;
     row.querySelector("strong").textContent = maskText(h.name);
     row.querySelector(".snippet").textContent = maskText(h.snippet);
@@ -1345,7 +1366,7 @@ function renderNewList() {
   if (newSel >= list.length) newSel = Math.max(0, list.length - 1);
   $("new-list").innerHTML = list.map((p, i) => p.create ? `
     <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}" data-create="1">
-      <span>📁 ディレクトリを作成して起動: ${esc(shortCwd(p.cwd))}</span>
+      <span>${t("new.createDirLaunch", { path: esc(shortCwd(p.cwd)) })}</span>
     </div>` : `
     <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}">
       <span class="proj-tag" style="background:${projColor(p.cwd)}">${esc(projName(p.cwd))}</span>
@@ -1361,25 +1382,25 @@ async function launchNew(agent, cwd, create = false) {
   newLaunchBusy = true;
   const r = await api("/api/new", { agent, cwd, create });
   newLaunchBusy = false;
-  if (r.error) { toast("起動失敗: " + r.error); return; }
+  if (r.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent, cwd,
     keys: new Set(sessions.filter(x => x.running).map(x => x.key)),
     until: Date.now() + 30_000,
   };
   closeNew();
-  toast(`▶ ${agent} を ${projName(cwd)} で起動しました`);
+  toast(t("toast.launched", { agent, project: projName(cwd) }));
 }
 // Ctrl+N: 選択カードと同じプロジェクト・同じエージェントで複製起動
 function duplicateSession(key) {
   const s = sessionOf(key);
-  if (!s?.cwd) { toast("カードが選択されていません"); return; }
+  if (!s?.cwd) { toast(t("toast.noCardSelected")); return; }
   launchNew(s.agent, s.cwd);
 }
 // Ctrl+C: 選択セッションの会話を resume で引き継いで新タブ起動(claude/codex 両対応)
 async function resumeContinue(key) {
   const s = sessionOf(key);
-  if (!s?.sid || !s?.cwd) { toast("引き継げるセッションがありません"); return; }
+  if (!s?.sid || !s?.cwd) { toast(t("toast.noResumable")); return; }
   // fork: 新しいセッションIDに分岐(素のresumeだと両プロセスが同一ログに追記して交錯する)
   await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
   pendingSelect = {
@@ -1387,7 +1408,7 @@ async function resumeContinue(key) {
     keys: new Set(sessions.filter(x => x.running).map(x => x.key)),
     until: Date.now() + 30_000,
   };
-  toast(`⎘ ${s.agent} の会話を引き継いで新タブで起動しました`);
+  toast(t("toast.forked", { agent: s.agent }));
 }
 function toggleNewAgent() {
   newAgent = newAgent === "claude" ? "codex" : "claude";

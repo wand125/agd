@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -160,47 +160,47 @@
 <header id="header">
   <h1>agd</h1>
   <div class="tabs">
-    <span class="tab on" id="tab-grid">画面一覧 <span class="badge" id="tab-grid-badge"></span></span>
-    <span class="tab" id="tab-list">セッション</span>
+    <span class="tab on" id="tab-grid"><span data-i18n="tab.grid">Screens</span> <span class="badge" id="tab-grid-badge"></span></span>
+    <span class="tab" id="tab-list" data-i18n="tab.list">Sessions</span>
   </div>
-  <span class="stats" id="stats">接続中…</span>
-  <input id="search" placeholder="絞り込み / Enterで全文検索・空白でAND (/)">
+  <span class="stats" id="stats">Connecting…</span>
+  <input id="search" data-i18n-ph="search.placeholder" placeholder="Filter / Enter for full-text search">
   <span class="chip on" data-filter="waiting">▲</span>
   <span class="chip on" data-filter="busy">●</span>
   <span class="chip on" data-filter="idle">○</span>
   <span class="chip on" data-filter="claude">claude</span>
   <span class="chip on" data-filter="codex">codex</span>
   <span class="pager" id="pager">
-    <select class="btn" id="per-page" title="1ページの表示数">
+    <select class="btn" id="per-page" data-i18n-title="perpage.title" title="Cards per page">
       <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option>
       <option value="6">6</option><option value="9">9</option><option value="12">12</option>
     </select>
-    <select class="btn" id="sort-mode" title="並び順">
-      <option value="stable" selected>固定順</option>
-      <option value="status">状態順</option>
+    <select class="btn" id="sort-mode" data-i18n-title="sort.title" title="Sort order">
+      <option value="stable" selected data-i18n="sort.stable">Fixed</option>
+      <option value="status" data-i18n="sort.status">By status</option>
     </select>
     <button id="page-prev">◀</button>
     <span id="page-info">1/1</span>
     <button id="page-next">▶</button>
   </span>
   <span class="spacer"></span>
-  <span id="kbd-help"><kbd>hjkl</kbd>移動 <kbd>i</kbd>入力 <kbd>o</kbd>詳細 <kbd>f</kbd>跳 <kbd>?</kbd>ヘルプ</span>
-  <button class="btn" id="new-btn">+ 新規</button>
-  <label><input type="checkbox" id="notify-toggle"> 通知</label>
-  <label><input type="checkbox" id="mac-notify-toggle"> macOS</label>
+  <span id="kbd-help" data-i18n-html="kbd.help"><kbd>hjkl</kbd>move <kbd>i</kbd>input <kbd>o</kbd>detail <kbd>f</kbd>jump <kbd>?</kbd>help</span>
+  <button class="btn" id="new-btn" data-i18n="btn.new">+ New</button>
+  <label><input type="checkbox" id="notify-toggle"> <span data-i18n="toggle.notify">Notify</span></label>
+  <label><input type="checkbox" id="mac-notify-toggle"> <span data-i18n="toggle.macnotify">macOS</span></label>
 </header>
 
 <div id="grid-view">
-  <div class="page-bar" id="bar-prev" title="前のページ">‹</div>
+  <div class="page-bar" id="bar-prev" data-i18n-title="page.prev" title="Previous page">‹</div>
   <div id="grid"></div>
-  <div class="page-bar" id="bar-next" title="次のページ">›</div>
-  <div id="empty" style="display:none">セッションが見つかりません</div>
+  <div class="page-bar" id="bar-next" data-i18n-title="page.next" title="Next page">›</div>
+  <div id="empty" style="display:none" data-i18n="grid.empty">No sessions found</div>
 </div>
 
 <div id="list-view">
-  <h2 class="section">実行中</h2>
+  <h2 class="section" data-i18n="list.running">Running</h2>
   <div class="rows" id="running-rows"></div>
-  <h2 class="section">resume 可能なセッション</h2>
+  <h2 class="section" data-i18n="list.resumable">Resumable sessions</h2>
   <div class="rows" id="resumables"></div>
 </div>
 
@@ -211,21 +211,21 @@
       <span class="agent-tag" id="d-agent"></span>
       <strong id="d-title"></strong>
       <span class="card-meta" id="d-meta"></span>
-      <select class="btn" id="d-sub" style="display:none;max-width:280px" title="サブエージェントのログを表示"></select>
+      <select class="btn" id="d-sub" style="display:none;max-width:280px" data-i18n-title="detail.subagent" title="Show subagent log"></select>
       <span class="spacer" style="flex:1"></span>
       <span id="d-kbd-hint" style="font-size:11px;color:var(--dim);white-space:nowrap"></span>
-      <button class="btn" id="d-jump">⌖ ジャンプ</button>
+      <button class="btn" id="d-jump" data-i18n="detail.jump">⌖ Jump</button>
       <button class="close" onclick="closeDetail()">✕</button>
     </div>
     <div id="detail-body">
       <div id="detail-screen">
         <div class="screen-wrap">
           <div class="screen" id="d-screen"></div>
-          <button class="latest-btn" id="d-latest">↓ 最新</button>
+          <button class="latest-btn" id="d-latest" data-i18n="card.latest">↓ Latest</button>
         </div>
         <div class="prompt-bar" id="d-prompt"></div>
         <div class="send-row">
-          <textarea id="d-input" rows="1" placeholder="このセッションに送信…(⏎送信 / ⇧⏎改行 / Escでスクロールモード)"></textarea>
+          <textarea id="d-input" rows="1" data-i18n-ph="detail.inputPlaceholder" placeholder="Send to this session… (⏎ send / ⇧⏎ newline / Esc to scroll mode)"></textarea>
         </div>
       </div>
       <div id="detail-log"></div>
@@ -235,7 +235,7 @@
 
 <div id="search-overlay" class="overlay">
   <div id="search-modal" class="modal">
-    <div class="modal-head">🔎 ログ横断検索: <span id="search-q"></span>
+    <div class="modal-head"><span data-i18n="search.title">🔎 Search across logs: </span><span id="search-q"></span>
       <button class="close" onclick="closeSearch()">✕</button></div>
     <div class="modal-body" id="search-results"></div>
   </div>
@@ -243,13 +243,13 @@
 
 <div id="new-overlay" class="overlay">
   <div id="new-modal" class="modal">
-    <div class="modal-head">新規セッション
-      <span class="chip on" id="new-agent-chip" title="Tabで切替">claude</span>
-      <span style="font-size:11px;color:var(--dim)"><kbd>j/k</kbd>選択 <kbd>i</kbd>絞込 <kbd>Tab</kbd>切替 <kbd>⏎</kbd>起動 <kbd>q</kbd>閉</span>
+    <div class="modal-head"><span data-i18n="new.title">New session</span>
+      <span class="chip on" id="new-agent-chip" data-i18n-title="new.agentSwitch" title="Tab to switch">claude</span>
+      <span style="font-size:11px;color:var(--dim)" data-i18n-html="new.hint"><kbd>j/k</kbd>select <kbd>i</kbd>filter <kbd>Tab</kbd>switch <kbd>⏎</kbd>launch <kbd>q</kbd>close</span>
       <button class="close" onclick="closeNew()">✕</button>
     </div>
     <div class="modal-body">
-      <input id="new-cwd" placeholder="プロジェクトを検索、または絶対パスを入力">
+      <input id="new-cwd" data-i18n-ph="new.placeholder" placeholder="Search a project, or type an absolute path">
       <div id="new-list"></div>
     </div>
   </div>
@@ -257,46 +257,46 @@
 
 <div id="help-overlay" class="overlay">
   <div id="help-modal" class="modal">
-    <div class="modal-head">キーボードショートカット <span style="font-size:11px;color:var(--dim)"><kbd>?</kbd> または <kbd>Esc</kbd> で閉じる</span>
+    <div class="modal-head"><span data-i18n="help.title">Keyboard shortcuts</span> <span style="font-size:11px;color:var(--dim)" data-i18n-html="help.close"><kbd>?</kbd> or <kbd>Esc</kbd> to close</span>
       <button class="close" onclick="closeHelp()">✕</button></div>
     <div class="modal-body" id="help-body">
       <table id="help-table">
-        <tr><th colspan="2">移動・選択(ノーマルモード)</th></tr>
-        <tr><td><kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd> / 矢印</td><td>カード移動(左右端でページ跨ぎ)</td></tr>
-        <tr><td><kbd>g</kbd> / <kbd>G</kbd></td><td>先頭 / 末尾のカードへ(詳細画面ではログの先頭/末尾)</td></tr>
-        <tr><td><kbd>]</kbd> / <kbd>[</kbd>(<kbd>Ctrl+f</kbd>/<kbd>Ctrl+b</kbd>)</td><td>次ページ / 前ページ</td></tr>
-        <tr><td><kbd>t</kbd></td><td>画面一覧 ⇄ セッションタブ切替</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>入力モードからノーマルへ(選択は維持)</td></tr>
-        <tr><th colspan="2">セッション操作</th></tr>
-        <tr><td><kbd>i</kbd></td><td>入力モード(送信欄へ)。リストでは詳細/resume</td></tr>
-        <tr><td><kbd>Enter</kbd></td><td>確定 — 入力待ちセッションに ⏎ を送信</td></tr>
-        <tr><td><kbd>1</kbd>〜<kbd>9</kbd></td><td>許可プロンプトの選択肢に応答(番号/カーソル両対応)</td></tr>
-        <tr><td><kbd>o</kbd></td><td>詳細ポップアップ(ログ+送信)</td></tr>
-        <tr><td><kbd>f</kbd></td><td>ターミナルへジャンプ(フォーカス)</td></tr>
-        <tr><td><kbd>m</kbd></td><td>⇧Tab 送信(permission モード切替)</td></tr>
-        <tr><td><kbd>s</kbd></td><td>Esc 送信(実行中の中断)</td></tr>
-        <tr><th colspan="2">起動・終了</th></tr>
-        <tr><td><kbd>n</kbd></td><td>新規セッションパレット</td></tr>
-        <tr><td><kbd>Ctrl+n</kbd></td><td>複製起動(同じプロジェクト・エージェント)</td></tr>
-        <tr><td><kbd>Ctrl+c</kbd></td><td>会話を引き継いで新タブ起動(resume)</td></tr>
-        <tr><td><kbd>:</kbd>q</td><td>選択セッションを終了 / 履歴を非表示</td></tr>
-        <tr><th colspan="2">整理・検索</th></tr>
-        <tr><td><kbd>p</kbd></td><td>ピン留め(セッション単位で先頭固定)</td></tr>
-        <tr><td><kbd>⇧H</kbd><kbd>⇧J</kbd><kbd>⇧K</kbd><kbd>⇧L</kbd></td><td>カードを左 / 下 / 上 / 右へ並び替え(位置を交換)</td></tr>
-        <tr><td><kbd>/</kbd></td><td>絞り込み検索(Enter でログ横断検索)</td></tr>
-        <tr><td><kbd>:</kbd></td><td>コマンドライン(q / show / new / mask / esc / mode / key / /コマンド)</td></tr>
-        <tr><td><kbd>:</kbd>mask</td><td>マスクモード — スクリーンショット用に全テキストをスクランブル</td></tr>
-        <tr><th colspan="2">入力欄・パレット内</th></tr>
-        <tr><td><kbd>/</kbd>...</td><td>送信欄で / を打つとスラッシュコマンドのヒント表示</td></tr>
-        <tr><td><kbd>Tab</kbd></td><td>ヒント補完 / パレットのエージェント切替</td></tr>
-        <tr><td>空欄で <kbd>Enter</kbd></td><td>入力待ちセッションに ⏎(確定)</td></tr>
-        <tr><td><kbd>⇧Enter</kbd></td><td>送信欄内で改行(欄は自動で上に拡張)</td></tr>
-        <tr><th colspan="2">詳細画面(o)</th></tr>
-        <tr><td><kbd>j</kbd><kbd>k</kbd> / <kbd>d</kbd><kbd>u</kbd> / <kbd>g</kbd><kbd>G</kbd></td><td>ログエントリを選択(1個 / ±5個 / 先頭・末尾)</td></tr>
-        <tr><td><kbd>Enter</kbd> / <kbd>l</kbd> / <kbd>h</kbd></td><td>選択エントリの開閉トグル / 開く / 閉じる</td></tr>
-        <tr><td><kbd>i</kbd> / <kbd>Esc</kbd> / <kbd>q</kbd></td><td>送信欄へ / 選択モードへ / 閉じる</td></tr>
-        <tr><td><kbd>s</kbd> / <kbd>m</kbd> / <kbd>:</kbd></td><td>中断(Esc送信)/ モード切替 / コマンドライン(:q で表示中セッションを終了)</td></tr>
-        <tr><td><kbd>Ctrl+n</kbd> / <kbd>Ctrl+c</kbd></td><td>表示中セッションを複製起動 / 会話を引き継いで起動(送信欄入力中も可)</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.move">Move &amp; select (normal mode)</th></tr>
+        <tr><td><kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd> / ←↑↓→</td><td data-i18n="help.move.hjkl">Move between cards (crosses pages at the edges)</td></tr>
+        <tr><td><kbd>g</kbd> / <kbd>G</kbd></td><td data-i18n="help.move.gG">First / last card (in detail view: first/last log entry)</td></tr>
+        <tr><td><kbd>]</kbd> / <kbd>[</kbd>(<kbd>Ctrl+f</kbd>/<kbd>Ctrl+b</kbd>)</td><td data-i18n="help.move.pages">Next page / previous page</td></tr>
+        <tr><td><kbd>t</kbd></td><td data-i18n="help.move.tab">Switch Screens ⇄ Sessions tab</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td data-i18n="help.move.esc">Insert mode → normal mode (selection kept)</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.session">Session actions</th></tr>
+        <tr><td><kbd>i</kbd></td><td data-i18n="help.sess.i">Insert mode (focus send box). In the list: detail/resume</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td data-i18n="help.sess.enter">Confirm — send ⏎ to a session waiting for input</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td data-i18n="help.sess.digits">Answer a permission prompt (numbered and cursor style)</td></tr>
+        <tr><td><kbd>o</kbd></td><td data-i18n="help.sess.o">Detail popup (log + send)</td></tr>
+        <tr><td><kbd>f</kbd></td><td data-i18n="help.sess.f">Jump to (focus) the terminal</td></tr>
+        <tr><td><kbd>m</kbd></td><td data-i18n="help.sess.m">Send ⇧Tab (cycle permission mode)</td></tr>
+        <tr><td><kbd>s</kbd></td><td data-i18n="help.sess.s">Send Esc (interrupt current work)</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.lifecycle">Launch &amp; close</th></tr>
+        <tr><td><kbd>n</kbd></td><td data-i18n="help.life.n">New session palette</td></tr>
+        <tr><td><kbd>Ctrl+n</kbd></td><td data-i18n="help.life.ctrln">Duplicate (same project and agent)</td></tr>
+        <tr><td><kbd>Ctrl+c</kbd></td><td data-i18n="help.life.ctrlc">Fork the conversation into a new tab (resume)</td></tr>
+        <tr><td><kbd>:</kbd>q</td><td data-i18n="help.life.q">Close the selected session / hide from history</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.organize">Organize &amp; search</th></tr>
+        <tr><td><kbd>p</kbd></td><td data-i18n="help.org.p">Pin (keep this session first)</td></tr>
+        <tr><td><kbd>⇧H</kbd><kbd>⇧J</kbd><kbd>⇧K</kbd><kbd>⇧L</kbd></td><td data-i18n="help.org.move">Reorder card left / down / up / right (swap positions)</td></tr>
+        <tr><td><kbd>/</kbd></td><td data-i18n="help.org.slash">Filter (Enter for full-text search across logs)</td></tr>
+        <tr><td><kbd>:</kbd></td><td data-i18n="help.org.colon">Command line (q / show / new / mask / esc / mode / key / /command)</td></tr>
+        <tr><td><kbd>:</kbd>mask</td><td data-i18n="help.org.mask">Mask mode — scramble all text for screenshots</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.input">Input box &amp; palette</th></tr>
+        <tr><td><kbd>/</kbd>...</td><td data-i18n="help.in.slash">Type / in the send box for slash-command hints</td></tr>
+        <tr><td><kbd>Tab</kbd></td><td data-i18n="help.in.tab">Complete a hint / switch agent in the palette</td></tr>
+        <tr><td data-i18n-html="help.emptyEnter"><kbd>Enter</kbd> when empty</td><td data-i18n="help.in.enter">Send ⏎ (confirm) to a session waiting for input</td></tr>
+        <tr><td><kbd>⇧Enter</kbd></td><td data-i18n="help.in.shiftenter">Newline in the send box (it grows upward)</td></tr>
+        <tr><th colspan="2" data-i18n="help.h.detail">Detail view (o)</th></tr>
+        <tr><td><kbd>j</kbd><kbd>k</kbd> / <kbd>d</kbd><kbd>u</kbd> / <kbd>g</kbd><kbd>G</kbd></td><td data-i18n="help.det.jk">Select a log entry (one / ±5 / first &amp; last)</td></tr>
+        <tr><td><kbd>Enter</kbd> / <kbd>l</kbd> / <kbd>h</kbd></td><td data-i18n="help.det.fold">Toggle / open / close the selected entry</td></tr>
+        <tr><td><kbd>i</kbd> / <kbd>Esc</kbd> / <kbd>q</kbd></td><td data-i18n="help.det.modes">Focus send box / selection mode / close</td></tr>
+        <tr><td><kbd>s</kbd> / <kbd>m</kbd> / <kbd>:</kbd></td><td data-i18n="help.det.ops">Interrupt (Esc) / permission mode / command line (:q closes the viewed session)</td></tr>
+        <tr><td><kbd>Ctrl+n</kbd> / <kbd>Ctrl+c</kbd></td><td data-i18n="help.det.dup">Duplicate / fork the viewed session (works while typing in the send box)</td></tr>
       </table>
     </div>
   </div>
@@ -305,6 +305,7 @@
 <div id="cmdline"><span>:</span><input id="cmd-input" autocomplete="off"></div>
 <div id="hint-panel"></div>
 
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
