@@ -70,10 +70,10 @@ function renderList() {
     // 入力待ちは一覧から直接答えられるようにする(詳細を開かせない)
     const answers = !readOnly && s.status === "waiting" && s.prompt?.options?.length
       ? `<div class="answers">${s.prompt.options.slice(0, 4).map((o, i) =>
-          `<button class="abtn" data-k="${esc(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}</div>`
+          `<button class="abtn" data-k="${escAttr(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}</div>`
       : "";
     const isPinned = pinned.includes(s.key);
-    return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${esc(s.key)}"
+    return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${escAttr(s.key)}"
       data-action="${isPinned ? "📌\n解除" : "📌\nピン"}">
       <span class="dot ${s.status}"></span>
       <div class="body">

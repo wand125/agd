@@ -89,6 +89,12 @@ function shortCwd(c) {
   return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
 }
 function esc(t) { return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+// 属性値用。端末画面やセッション名など外部由来の文字列を title="..." や data-* に
+// 入れる場合は必ずこちら。esc() は " を残すため属性を抜け出せてしまう
+function escAttr(t) {
+  return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 // ---------------- マスクモード(スクリーンショット用) ----------------
 // 決定的スクランブル: 英字→英字・数字→数字・CJK→ダミー漢字。空白/記号/罫線は保持するので
 // レイアウトと ANSI カラーはそのまま、内容だけが読めなくなる。:mask で切替
@@ -791,15 +797,15 @@ function renderPromptBar(bar, s) {
   const p = s.prompt;
   const opts = p?.options ?? [];
   let html = "";
-  if (p?.question) html += `<div class="prompt-q" title="${esc(maskText(p.question))}">${esc(maskText(p.question))}</div>`;
+  if (p?.question) html += `<div class="prompt-q" title="${escAttr(maskText(p.question))}">${esc(maskText(p.question))}</div>`;
   if (opts.length && p.kind === "numbered") {
     html += opts.map((o, i) =>
-      `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${esc(o.key)}" data-index="${i}" title="${esc(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
+      `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${escAttr(o.key)}" data-index="${i}" title="${escAttr(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
     ).join("");
   } else if (opts.length && p.kind === "cursor") {
     // カーソル選択: クリックで ↑/↓×n → Enter を送る
     html += opts.map((o, i) =>
-      `<button class="btn ${i === p.cursorIndex ? "cursor-on" : ""}" data-mode="cursor" data-index="${i}" title="${esc(maskText(o.label))}">${i + 1}. ${i === p.cursorIndex ? "❯ " : ""}${esc(maskText(o.label.slice(0, 22)))}</button>`
+      `<button class="btn ${i === p.cursorIndex ? "cursor-on" : ""}" data-mode="cursor" data-index="${i}" title="${escAttr(maskText(o.label))}">${i + 1}. ${i === p.cursorIndex ? "❯ " : ""}${esc(maskText(o.label.slice(0, 22)))}</button>`
     ).join("");
     html += `<button class="btn" data-mode="key" data-key="Escape">Esc</button>`;
   } else {
@@ -1214,7 +1220,7 @@ async function loadSubagents(s) {
     if (!subagents.length) { sel.style.display = "none"; return; }
     const cur = sel.value;
     sel.innerHTML = `<option value="">${t("detail.main")}</option>` + subagents.map(a =>
-      `<option value="${esc(a.id)}">${a.active ? "● " : ""}sub: ${esc(maskText(a.name))}</option>`).join("");
+      `<option value="${escAttr(a.id)}">${a.active ? "● " : ""}sub: ${esc(maskText(a.name))}</option>`).join("");
     sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
     sel.style.display = "";
   } catch {}
@@ -1437,10 +1443,10 @@ function renderNewList() {
   const list = newFiltered();
   if (newSel >= list.length) newSel = Math.max(0, list.length - 1);
   $("new-list").innerHTML = list.map((p, i) => p.create ? `
-    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}" data-create="1">
+    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${escAttr(p.cwd)}" data-create="1">
       <span>${t("new.createDirLaunch", { path: esc(shortCwd(p.cwd)) })}</span>
     </div>` : `
-    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${esc(p.cwd)}">
+    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${escAttr(p.cwd)}">
       <span class="proj-tag" style="background:${projColor(p.cwd)}">${esc(projName(p.cwd))}</span>
       <span>${esc(shortCwd(p.cwd))}</span>
       <span class="card-meta">${p.ageS === Infinity ? "" : fmtAge(p.ageS)}</span>

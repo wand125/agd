@@ -28,7 +28,15 @@ function shortCwd(c) {
   if (agd.pathStrip && s.startsWith(agd.pathStrip)) s = "…" + s.slice(agd.pathStrip.length);
   return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
 }
+// 本文用。< と & だけ潰せば要素の外には出られない
 function esc(t) { return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+// 属性値用。端末画面やセッション名など外部由来の文字列を title="..." や
+// data-* に入れる場合は必ずこちらを使う。esc() は " を残すため、
+// 属性を抜け出して別の属性(onerror= など)を注入できてしまう。
+function escAttr(t) {
+  return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 function projName(cwd) {
   const parts = (cwd || "").split("/").filter(Boolean);
