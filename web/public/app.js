@@ -581,7 +581,7 @@ async function runCommand(c) {
     if (!s) { toast(t("toast.qNoSession")); return; }
     const viewing = detailKey === selKey && $("overlay").classList.contains("show");
     if (s.running) {
-      if (!canOperate(s)) { toast(t("toast.ttyCloseUnknown")); return; }
+      if (!canOperate(s) && !s.pid) { toast(t("toast.ttyCloseUnknown")); return; }
       closing.add(s.key);
       render();
       const r = await api("/api/close", { ...target(s) });

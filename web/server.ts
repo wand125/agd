@@ -183,7 +183,10 @@ async function claudeRunning(): Promise<Session[]> {
     const m = l.trim().match(/^(\d+)\s+(\S+)/);
     if (m) ttyByPid.set(Number(m[1]), m[2] === "??" ? "" : m[2]);
   }
-  const list = arr.map(a => {
+  // ps に出てこない pid は既に死んでいる。claude agents の情報が古い場合に
+  // 「実行中なのに tty も画面も無い」カードが残り続けるのを防ぐ
+  const alive = arr.filter(a => ttyByPid.has(a.pid));
+  const list = alive.map(a => {
     let status: string = a.status ?? "idle";
     if (/wait|input|need/i.test(status)) status = "waiting";
     return {
@@ -216,7 +219,11 @@ async function codexRunning(): Promise<Session[]> {
     // 実行ファイル名が codex であればよい。`codex exec`(非対話・agd の管理外)は除外する。
     const argv0 = cmd.split(/\s+/)[0];
     if (!/(^|\/)codex$/.test(argv0)) continue;
-    if (/^\S*codex\s+(exec|e)\b/.test(cmd)) continue;
+    // 対話セッションは必ず端末に紐づく。tty を持たないものは agd の管理対象外。
+    // exec(非対話)のほか、ChatGPT アプリが常駐させる app-server / mcp-server /
+    // code-mode-host なども入ってくるため、ここでまとめて弾く
+    if (m[2] === "??") continue;
+    if (/^\S*codex\s+(exec|e|app-server|mcp-server|exec-server|remote-control|completion|doctor)\b/.test(cmd)) continue;
     // `codex resume <sid>` / `codex fork <sid>` は sid がコマンドラインに出る。
     // cwd からの逆引きより確実なのでこちらを優先する。
     const sid = cmd.match(/\b(?:resume|fork)\s+([0-9a-fA-F-]{36})\b/)?.[1] ?? "";
@@ -1619,7 +1626,20 @@ try {
       const { tty, cardKey } = await req.json();
       const rm = remoteOf(String(cardKey ?? ""));
       if (rm) return Response.json({ result: await remoteClose(rm.h, rm.paneId) });
-      if (!tty) return Response.json({ error: "tty required" }, { status: 400 });
+      // tty が取れないセッション(端末を閉じた後など)は pid に SIGTERM を送る。
+      // これが無いと一覧から消せないカードが残り続ける
+      if (!tty) {
+        const s = lastSnapshot.sessions.find(x => x.key === cardKey);
+        if (s?.pid) {
+          try { process.kill(s.pid, "SIGTERM"); return Response.json({ result: "ok(signal)" }); }
+          catch (e: any) {
+            // 既に死んでいるなら目的は達成されている
+            if (e?.code === "ESRCH") return Response.json({ result: "ok(gone)" });
+            return Response.json({ result: "error: " + (e?.message ?? e) });
+          }
+        }
+        return Response.json({ error: "tty required" }, { status: 400 });
+      }
       const r = await closeTty(tty);
       return Response.json({ result: r });
     }
