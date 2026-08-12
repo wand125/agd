@@ -395,7 +395,9 @@ function renderGrid() {
     const pt = el.querySelector(".proj-tag");
     pt.textContent = projName(s.cwd);
     pt.style.background = projColor(s.cwd);
-    el.querySelector(".card-title").textContent = maskText(s.name);
+    // 識別名(0-group-14)＋ Claude アプリの表示名(ai-title)を併記
+    el.querySelector(".card-title").innerHTML =
+      esc(maskText(s.name)) + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
     el.querySelector(".card-meta").textContent = fmtAge(s.ageS);
     el.querySelector(".git-badge").innerHTML = gitBadge(s.git);
     el.querySelector(".pin-btn").classList.toggle("pinned", pinned.includes(s.key));
@@ -743,7 +745,8 @@ function buildRow(s, running) {
     <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
     <span class="card-meta"></span>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
-  row.querySelector(".card-title").textContent = maskText(s.name);
+  row.querySelector(".card-title").innerHTML =
+    esc(maskText(s.name)) + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
@@ -1112,7 +1115,8 @@ async function openDetail(key) {
   if (!s) return;
   $("overlay").classList.add("show");
   $("d-agent").textContent = s.agent;
-  $("d-title").textContent = maskText(s.name);
+  $("d-title").innerHTML =
+    esc(maskText(s.name)) + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   $("d-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)}`;
   $("d-dot").style.background = getComputedStyle(document.documentElement).getPropertyValue(`--${s.status}`) || "#666";
   detailScrolled = false;

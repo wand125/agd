@@ -154,6 +154,7 @@ export type Session = {
   agent: "claude" | "codex";
   sid: string;
   name: string;
+  title?: string;        // Claude アプリの表示名(ai-title)。あれば併記する
   cwd: string;
   status: string;         // busy | waiting | idle | resumable
   running: boolean;
@@ -190,6 +191,8 @@ async function claudeRunning(): Promise<Session[]> {
       agent: "claude" as const,
       sid: a.sessionId,
       name: a.name || a.sessionId,
+      // Claude アプリ側の表示名(ai-title)。識別名と併記する
+      title: aiTitleForSid(a.sessionId),
       cwd: a.cwd,
       status,
       running: true,
@@ -288,6 +291,7 @@ function claudeRecent(excludeSids: Set<string>): Session[] {
     if (name === c.sid) name = historyPrompt(c.sid) || c.sid;
     out.push({
       key: `claude:${c.sid}`, agent: "claude", sid: c.sid, name, cwd,
+      title: aiTitleOf(c.path),
       status: "resumable", running: false, tty: "",
       ageS: Math.floor((Date.now() - c.mtime) / 1000),
     });
@@ -812,6 +816,44 @@ function findClaudeTranscript(sid: string): string | null {
 
 // ---------------------------------------------------------------- 横断ログ検索
 type SearchHit = { agent: string; sid: string; name: string; cwd: string; mtime: number; count: number; snippet: string };
+
+// Claude アプリ(Remote Control 等)に出る表示名。トランスクリプトに
+// {"type":"ai-title","aiTitle":"…"} として記録される。会話が進むと更新される
+// ため、最後に現れたものを採用する。mtime が変わるまでは再走査しない。
+const aiTitleCache = new Map<string, { mtime: number; title: string }>();
+function aiTitleOf(path: string): string {
+  let st;
+  try { st = statSync(path); } catch { return ""; }
+  const c = aiTitleCache.get(path);
+  if (c && c.mtime === st.mtimeMs) return c.title;
+  let title = "";
+  try {
+    // ai-title 行はファイル末尾側に付くので、後ろから 512KB だけ見る。
+    // 先頭が途中で切れても行単位で捨てるので問題ない。
+    const TAIL = 512 * 1024;
+    const start = Math.max(0, st.size - TAIL);
+    const fd = openSync(path, "r");
+    const buf = Buffer.alloc(st.size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    closeSync(fd);
+    for (const line of buf.toString("utf8").split("\n")) {
+      if (!line.includes('"ai-title"')) continue;
+      try {
+        const o = JSON.parse(line);
+        if (o?.type === "ai-title" && typeof o.aiTitle === "string" && o.aiTitle.trim())
+          title = o.aiTitle.trim();       // 最後に見つかったものが最新
+      } catch {}
+    }
+  } catch {}
+  aiTitleCache.set(path, { mtime: st.mtimeMs, title });
+  return title;
+}
+
+// sid だけ分かっている場合(実行中セッション)の表示名解決
+function aiTitleForSid(sid: string): string {
+  const p = findClaudeTranscript(sid);
+  return p ? aiTitleOf(p) : "";
+}
 
 function claudeNameFor(sid: string, path: string): string {
   try {

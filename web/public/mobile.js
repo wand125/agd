@@ -53,6 +53,7 @@ function renderList() {
           <span class="name">${esc(maskText(s.name))}</span>
           ${host}<span class="age">${fmtAge(s.ageS)}</span>
         </div>
+        ${s.title ? `<div class="ai-title">${esc(maskText(s.title))}</div>` : ""}
         ${s.summary ? `<div class="sum">${esc(maskText(s.summary))}</div>` : ""}
         ${answers}
       </div>
@@ -104,7 +105,8 @@ async function openDetail(key) {
   if (!s) return;
   openKey = key;
   $("detail").classList.add("on");
-  $("dtitle").textContent = maskText(s.name);
+  $("dtitle").innerHTML = esc(maskText(s.name))
+    + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   $("dmeta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
   $("ddot").className = `dot ${s.status}`;
   setTab("screen", true);
@@ -125,6 +127,26 @@ function closeDetail() {
   clearInterval(logTimer);
 }
 $("dclose").onclick = closeDetail;
+
+// 左フリックで一覧へ戻る(iOS の「戻る」ジェスチャに合わせる)。
+// 縦スクロールや端末画面の横スクロールを邪魔しないよう、横移動が縦より
+// 十分大きい場合だけ反応させる。
+(function swipeBack() {
+  const el = $("detail");
+  let x0 = 0, y0 = 0, tracking = false;
+  el.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  el.addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    // 右→左に 70px 以上、かつ横移動が縦の2倍以上
+    if (dx < -70 && Math.abs(dx) > Math.abs(dy) * 2) closeDetail();
+  }, { passive: true });
+})();
 
 // スクロールするのは #dbody。#dscreen / #dlog は中身なので自身では動かない
 function atBottom(margin = 60) {
