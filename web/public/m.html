@@ -66,7 +66,11 @@
   #list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
           padding-bottom: calc(var(--safe-bottom) + 12px); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
-         border-bottom: 1px solid var(--border); background: var(--bg); }
+         border-bottom: 1px solid var(--border); background: var(--bg);
+         /* 縦スクロールはブラウザに任せ、横方向のジェスチャだけ JS が扱う。
+            auto のままだと横フリック中も慣性の縦スクロールが続き、
+            掴んでいない行まで動いて見える */
+         touch-action: pan-y; }
   /* スワイプ中の行だけを合成レイヤーに上げる。全行に will-change を付けると
      各行が独立レイヤーになり、通常スクロール時に浮いて見える */
   .row.swiping { position: relative; z-index: 1; will-change: transform; }

@@ -62,6 +62,9 @@ let swiping = false;      // 行スワイプ中は再描画を止める
 function renderList() {
   renderCounts();
   if (swiping) return;    // 描き直すと対象行が別要素になり操作が壊れる
+  // 前回のスワイプで付いたインラインスタイルが残っていると、次の描画で
+  // それが引き継がれて他の行まで動いて見えることがある
+  document.querySelectorAll("#list .row[style]").forEach(r => r.removeAttribute("style"));
   const list = visible();
   const el = $("list");
   if (!list.length) { el.innerHTML = `<div class="empty">${esc(t("m.empty"))}</div>`; return; }
