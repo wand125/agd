@@ -958,6 +958,8 @@ document.addEventListener("keydown", (e) => {
       rows[n]?.scrollIntoView({ block: "nearest" });
       syncSplitDetail();            // 選んだセッションを右に出す
     };
+    // ピンはどちらのペインにいても、選択中のセッションに効く
+    if (e.key === "p" && listKey) { e.preventDefault(); togglePin(listKey); return; }
     if (splitPane === "list") {
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return; }
       if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return; }
