@@ -915,8 +915,12 @@ function updateKbdSelection() {
   if (kbdKey) localStorage.setItem("agd-kbd-key", kbdKey);
   else localStorage.removeItem("agd-kbd-key");
 }
-document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+// ---------------- キーボード操作 ----------------
+// 各ハンドラは「自分が処理したら true」を返す。dispatch は上から順に試し、
+// 最初に true を返したところで止める。優先順位はこの配列の並びがすべて。
+
+// 新規セッションパレット(開いている間はここだけ)
+function keyPalette(e) {
   if ($("new-overlay").classList.contains("show")) {
     // パレットのノーマルモード(入力欄から Esc で抜けた状態): vim キーで操作
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); newMoveSel(1); }
@@ -925,17 +929,32 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
     else if (e.key === "Enter") launchFromPalette();
     else if (e.key === "Escape" || e.key === "q") closeNew();
-    return;
+    return true;
   }
+  return false;
+}
+
+// リモート接続モーダル
+function keyAttach(e) {
   if ($("attach-overlay").classList.contains("show")) {
     if (e.key === "Enter") { e.preventDefault(); runAttach(); }
     else if (e.key === "Escape" || e.key === "q") closeAttach();
-    return;
+    return true;
   }
+  return false;
+}
+
+// ヘルプ
+function keyHelp(e) {
   if ($("help-overlay").classList.contains("show")) {
     if (e.key === "Escape" || e.key === "?" || e.key === "q") closeHelp();
-    return;
+    return true;
   }
+  return false;
+}
+
+// タブ切替。並列では詳細が常時開いているため最優先で見る
+function keyTab(e) {
   // タブ切替はどのビューより先に処理する。並列ビューでは詳細が常時開いており、
   // モーダル用の分岐で return されて後方まで届かないため
   if (e.key === "t" && !$("new-overlay").classList.contains("show")
@@ -944,9 +963,14 @@ document.addEventListener("keydown", (e) => {
       && !$("attach-overlay").classList.contains("show")) {
     const order = ["split", "list", "grid"];   // タブの並び順に巡回する
     setTab(order[(order.indexOf(activeTab) + 1) % order.length]);
-    return;
+    return true;
   }
 
+  return false;
+}
+
+// 並列ビュー: 左右のペインをまたぐカーソル移動
+function keySplit(e) {
   // ---- 並列ビュー: 左右のペインをまたいでカーソルを動かす ----
   if (activeTab === "split" && !$("new-overlay").classList.contains("show")) {
     const rows = [...document.querySelectorAll("#list-view .resume-row")];
@@ -959,21 +983,26 @@ document.addEventListener("keydown", (e) => {
       syncSplitDetail();            // 選んだセッションを右に出す
     };
     // ピンはどちらのペインにいても、選択中のセッションに効く
-    if (e.key === "p" && listKey) { e.preventDefault(); togglePin(listKey); return; }
+    if (e.key === "p" && listKey) { e.preventDefault(); togglePin(listKey); return true; }
     if (splitPane === "list") {
-      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return; }
-      if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return; }
-      if (e.key === "g") { setSel(0); return; }
-      if (e.key === "G") { setSel(rows.length - 1); return; }
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return true; }
+      if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return true; }
+      if (e.key === "g") { setSel(0); return true; }
+      if (e.key === "G") { setSel(rows.length - 1); return true; }
       // 右のペインへ渡る
-      if (e.key === "l" || e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); setSplitPane("detail"); return; }
-      if (e.key === "i") { e.preventDefault(); setSplitPane("detail"); $("d-input").focus(); return; }
+      if (e.key === "l" || e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); setSplitPane("detail"); return true; }
+      if (e.key === "i") { e.preventDefault(); setSplitPane("detail"); $("d-input").focus(); return true; }
     } else {
       // 右(詳細)にいるとき、左端で h / ← なら一覧へ戻る
-      if ((e.key === "h" || e.key === "ArrowLeft") && detailSel < 0) { e.preventDefault(); setSplitPane("list"); return; }
-      if (e.key === "Escape" && document.activeElement !== $("d-input")) { e.preventDefault(); setSplitPane("list"); return; }
+      if ((e.key === "h" || e.key === "ArrowLeft") && detailSel < 0) { e.preventDefault(); setSplitPane("list"); return true; }
+      if (e.key === "Escape" && document.activeElement !== $("d-input")) { e.preventDefault(); setSplitPane("list"); return true; }
     }
   }
+  return false;
+}
+
+// 詳細(ログの選択・開閉とセッション操作)
+function keyDetail(e) {
   if ($("overlay").classList.contains("show")) {
     // 詳細画面のノーマルモード: エントリ(ボックス)を選択して開閉する
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); moveDetailSel(1); }
@@ -995,14 +1024,29 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", t("action.mode"));
     else if (e.key === ":") { e.preventDefault(); openCmdline(); }
     else if (e.key === "Escape" || e.key === "q") closeDetail();
-    return;
+    return true;
   }
+  return false;
+}
+
+// 検索結果
+function keySearch(e) {
   if ($("search-overlay").classList.contains("show")) {
     if (e.key === "Escape") closeSearch();
-    return;
+    return true;
   }
-  if (e.key === ":") { e.preventDefault(); openCmdline(); return; }
-  if (e.key === "?") { e.preventDefault(); toggleHelp(); return; }
+  return false;
+}
+
+// コマンドラインとヘルプ。どのビューでも共通で開ける
+function keyGlobal(e) {
+  if (e.key === ":") { e.preventDefault(); openCmdline(); return true; }
+  if (e.key === "?") { e.preventDefault(); toggleHelp(); return true; }
+  return false;
+}
+
+// セッションタブ: 行の選択と操作
+function keyList(e) {
   if (activeTab === "list") {
     // セッションタブ: vim風の行選択と操作
     const rows = [...document.querySelectorAll("#list-view .resume-row")];
@@ -1029,16 +1073,21 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "p" && s) togglePin(listKey);
     else if (e.key === "n") { e.preventDefault(); openNew(); }
     else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
-    return;
+    return true;
   }
+  return false;
+}
+
+// 画面一覧: hjkl でカードを移動
+function keyGrid(e) {
   // vim風ノーマルモード: hjkl で上下左右移動(選択はカードに追従)、i で入力モードへ
   const cards = visibleCards();
   const curIdx = cards.findIndex(el => el.dataset.key === kbdKey);
   const selectIdx = (i) => { kbdKey = cards[i]?.dataset.key ?? null; updateKbdSelection(); };
   const move = (dx, dy) => {
     e.preventDefault();
-    if (!cards.length) return;
-    if (curIdx < 0) { selectIdx(0); return; }
+    if (!cards.length) return true;
+    if (curIdx < 0) { selectIdx(0); return true; }
     if (dx) {
       const col = curIdx % gridCols;
       const row = Math.floor(curIdx / gridCols);
@@ -1102,6 +1151,27 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "p" && kbdKey) togglePin(kbdKey);
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
   else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
+  return false;
+}
+
+// 上から順に試し、最初に処理したハンドラで打ち切る
+const KEY_HANDLERS = [
+  keyPalette,   // モーダル類は最優先
+  keyAttach,
+  keyHelp,
+  keyTab,       // タブ切替は詳細より先(並列では詳細が常時開いているため)
+  keySplit,
+  keyDetail,
+  keySearch,
+  keyGlobal,   // : と ? はどのビューでも使える
+  keyList,
+  keyGrid,
+];
+
+document.addEventListener("keydown", (e) => {
+  // 入力欄にフォーカスがあるときは各要素のハンドラに任せる
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+  for (const h of KEY_HANDLERS) if (h(e)) return;
 });
 
 // ---------------- 詳細ビュー ----------------
