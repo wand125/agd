@@ -20,6 +20,19 @@
   #mobile-banner a { color: var(--accent); font-weight: 600; white-space: nowrap; margin-left: auto; }
   #mobile-banner button { background: none; border: none; color: var(--dim); font-size: 15px; padding: 0 2px; cursor: pointer; }
   * { box-sizing: border-box; margin: 0; }
+  /* ---- テキスト選択の可否 ----
+     既定は選択不可にして、ドラッグ操作やダブルクリックで UI が青く反転するのを防ぐ。
+     読んでコピーしたい箇所(端末画面・ログ・要約・パス等)だけを明示的に許可する。 */
+  body { user-select: none; -webkit-user-select: none; }
+  .screen, .entry, .card-summary, .row-summary, .ai-title, .card-meta,
+  #dmeta, #search-results, #detail-log, #hint-panel .desc, pre, code, input, textarea {
+    user-select: text; -webkit-user-select: text;
+  }
+  /* ボタン類は中の文字も含めて常に選択不可(押す対象であって読む対象ではない) */
+  button, .btn, .chip, .tab, .jump-btn, .page-bar, .abtn, kbd,
+  .pager, #kbd-help, .proj-tag, .agent-tag, .dot, .latest-btn, .load-older {
+    user-select: none !important; -webkit-user-select: none !important;
+  }
   html, body { height: 100%; }
   body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", sans-serif; font-size: 14px; overflow: hidden; display: flex; flex-direction: column; }
   header { display: flex; align-items: center; gap: 9px; padding: 7px 14px; border-bottom: 1px solid var(--border); background: var(--bg); flex-wrap: wrap; flex: none; }
@@ -74,7 +87,12 @@
   .card-meta { color: var(--dim); font-size: 11px; white-space: nowrap; flex: none; }
   .git-badge { color: var(--dim); font-size: 11px; white-space: nowrap; flex: none; }
   .git-badge .dirty { color: var(--busy); }
-  .jump-btn { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 15px; padding: 0 2px; flex: none; }
+  .jump-btn { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 15px; padding: 0 2px; flex: none;
+              display: inline-flex; align-items: center; }
+  /* 線画アイコン。currentColor なので hover やピン留め状態の色がそのまま乗る */
+  .jump-btn svg, .btn .icon { width: 15px; height: 15px; fill: none; stroke: currentColor;
+              stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -2px; }
+  .pin-btn svg { width: 14px; height: 14px; }
   .jump-btn:hover { color: var(--accent); }
   .pin-btn { opacity: .3; font-size: 13px; }
   .pin-btn.pinned { opacity: 1; color: var(--busy); }

@@ -429,9 +429,15 @@ function buildCard(key) {
       <button class="jump-btn pin-move pin-up" title="${t("card.moveUp")}">▲</button>
       <button class="jump-btn pin-move pin-down" title="${t("card.moveDown")}">▼</button>
       <button class="jump-btn pin-move pin-right" title="${t("card.moveRight")}">▶</button>
-      <button class="jump-btn pin-btn" title="${t("card.pin")}">📌</button>
-      <button class="jump-btn detail-btn" title="${t("card.detail")}">⤢</button>
-      <button class="jump-btn go-btn" title="${t("card.jump")}">⌖</button>
+      <button class="jump-btn pin-btn" title="${t("card.pin")}">
+        <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></svg>
+      </button>
+      <button class="jump-btn detail-btn" title="${t("card.detail")}">
+        <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>
+      </button>
+      <button class="jump-btn go-btn" title="${t("card.jump")}">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
     </div>
     <div class="card-summary" style="display:none"></div>
     <div class="prompt-bar" style="display:none"></div>
@@ -754,7 +760,7 @@ function buildRow(s, running) {
   const btns = document.createElement('span');
   btns.className = "row-btns";
   if (running) {
-    btns.innerHTML = `<button class="btn">${t("row.log")}</button> <button class="btn">⌖</button>`;
+    btns.innerHTML = `<button class="btn">${t("row.log")}</button> <button class="btn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>`;
     const [logBtn, jumpBtn] = btns.querySelectorAll("button");
     logBtn.onclick = () => openDetail(s.key);
     jumpBtn.onclick = () => jump(s.key);

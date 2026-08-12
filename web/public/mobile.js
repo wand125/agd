@@ -126,7 +126,7 @@ function closeDetail() {
   openKey = null;
   clearInterval(logTimer);
 }
-$("dclose").onclick = closeDetail;
+$("dback").onclick = closeDetail;
 
 // スクロールするのは #dbody。#dscreen / #dlog は中身なので自身では動かない
 function atBottom(margin = 60) {

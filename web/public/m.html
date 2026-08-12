@@ -15,6 +15,19 @@
     --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
   * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+  /* ---- テキスト選択の可否 ----
+     スマホでは長押しやスワイプで意図せず選択・コピーメニューが出るため、
+     既定は選択不可。読んでコピーしたい箇所だけ許可する。
+     -webkit-touch-callout も切らないと iOS で長押しメニューが出る。 */
+  body { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  #dscreen, .entry, .sum, #dmeta, .ai-title, input, textarea {
+    user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
+  }
+  /* 押す対象は常に選択不可。フリック中に文字が反転するのを防ぐ */
+  button, .chip, .abtn, .hbtn, #dtabs div, .proj, .host, .dot, .age, .name {
+    user-select: none !important; -webkit-user-select: none !important;
+    -webkit-touch-callout: none !important;
+  }
   html, body { height: 100%; }
   body {
     background: var(--bg); color: var(--fg); font-size: 15px;
@@ -32,7 +45,11 @@
   .counts { display: flex; gap: 8px; font-size: 13px; margin-left: auto; }
   .counts b { font-weight: 600; }
   .c-waiting { color: var(--waiting); } .c-busy { color: var(--busy); } .c-idle { color: var(--idle); }
-  .hbtn { background: none; border: none; color: var(--dim); font-size: 17px; padding: 4px; cursor: pointer; }
+  .hbtn { background: none; border: none; color: var(--dim); padding: 6px; cursor: pointer;
+          display: inline-flex; align-items: center; justify-content: center; }
+  /* 線画アイコン。currentColor で色が決まるので状態に応じて CSS だけで変えられる */
+  .hbtn svg { width: 21px; height: 21px; fill: none; stroke: currentColor;
+              stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
   /* ---- フィルタ: 既定は隠す。必要なときだけ開く ---- */
   #filters { flex: none; display: none; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; }
@@ -83,23 +100,28 @@
 
   /* ---- 詳細: 全画面。画面キャプチャと会話ログをタブで切替 ---- */
   #detail { position: fixed; inset: 0; background: var(--bg); z-index: 20;
-            display: none; flex-direction: column; }
+            display: none; flex-direction: column; max-width: 100vw; overflow: hidden; }
   #detail.on { display: flex; }
   #dhead { flex: none; display: flex; align-items: center; gap: 9px;
            padding: calc(var(--safe-top) + 8px) 12px 8px; border-bottom: 1px solid var(--border); }
+  #dback { color: var(--accent); flex: none; padding: 6px 8px 6px 0; }
+  #dback svg { width: 24px; height: 24px; }
   #dtitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #dmeta { font-size: 11.5px; color: var(--dim); }
   #dtabs { flex: none; display: flex; border-bottom: 1px solid var(--border); }
   #dtabs div { flex: 1; text-align: center; padding: 9px; font-size: 13.5px; color: var(--dim); }
   #dtabs div.on { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
-  #dbody { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+  #dbody { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+           min-height: 0; min-width: 0; width: 100%; }
   /* 端末画面は横スクロールで原寸を保つ(折り返すと桁が崩れて読めない) */
   #dscreen { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; line-height: 1.4;
              background: #010409; color: #b0bac4; padding: 10px; white-space: pre;
-             overflow-x: auto; min-height: 100%; }
-  #dlog { padding: 10px 12px calc(var(--safe-bottom) + 80px); display: flex; flex-direction: column; gap: 8px; }
+             overflow-x: auto; min-height: 100%; max-width: 100%; }
+  #dlog { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px;
+          max-width: 100%; min-width: 0; }
   .entry { border-radius: 8px; padding: 9px 11px; font-size: 13.5px; line-height: 1.55;
-           white-space: pre-wrap; word-break: break-word; }
+           white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+           max-width: 100%; min-width: 0; }
   .entry.user { background: rgba(31,111,235,.15); border: 1px solid rgba(31,111,235,.4); align-self: flex-end; max-width: 88%; }
   .entry.assistant { background: #1c2129; border: 1px solid var(--border); }
   .entry.thinking, .entry.tool_use, .entry.tool_result { color: var(--dim); font-size: 12px;
@@ -128,8 +150,12 @@
   <h1>agd</h1>
   <span id="conn" style="font-size:11px;color:var(--dim)"></span>
   <span class="counts" id="counts"></span>
-  <button class="hbtn" id="btn-q">🔍</button>
-  <button class="hbtn" id="btn-f">⚙</button>
+  <button class="hbtn" id="btn-q" aria-label="検索">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+  </button>
+  <button class="hbtn" id="btn-f" aria-label="絞り込み">
+    <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
+  </button>
 </header>
 <div id="qwrap"><input id="q" placeholder="絞り込み" autocomplete="off"></div>
 <div id="filters"></div>
@@ -137,12 +163,14 @@
 
 <div id="detail">
   <div id="dhead">
+    <button class="hbtn" id="dback" aria-label="戻る">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
     <span class="dot" id="ddot"></span>
     <div style="flex:1;min-width:0">
       <div id="dtitle"></div>
       <div id="dmeta"></div>
     </div>
-    <button class="hbtn" id="dclose">✕</button>
   </div>
   <div id="dtabs">
     <div data-t="screen" class="on">画面</div>
