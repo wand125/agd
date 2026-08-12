@@ -78,41 +78,15 @@ const filters = { waiting: true, busy: true, idle: true, claude: true, codex: tr
 const PER_PAGE_LAYOUT = { 1: [1, 1], 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3] };
 
 // ---------------- ユーティリティ ----------------
-function fmtAge(s) {
-  if (s < 60) return s + "s"; if (s < 3600) return Math.floor(s / 60) + "m";
-  if (s < 86400) return Math.floor(s / 3600) + "h"; return Math.floor(s / 86400) + "d";
-}
 let pathStrip = "";  // AGD_PATH_STRIP で指定された共通プレフィックスを「…」に短縮
 function shortCwd(c) {
   let s = c || "";
   if (pathStrip && s.startsWith(pathStrip)) s = "…" + s.slice(pathStrip.length);
   return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
 }
-function esc(t) { return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
-// 属性値用。端末画面やセッション名など外部由来の文字列を title="..." や data-* に
-// 入れる場合は必ずこちら。esc() は " を残すため属性を抜け出せてしまう
-function escAttr(t) {
-  return (t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
 // ---------------- マスクモード(スクリーンショット用) ----------------
 // 決定的スクランブル: 英字→英字・数字→数字・CJK→ダミー漢字。空白/記号/罫線は保持するので
 // レイアウトと ANSI カラーはそのまま、内容だけが読めなくなる。:mask で切替
-let maskMode = localStorage.getItem("agd-mask") === "1";
-const MASK_CJK = ["\u5185", "\u5bb9", "\u79d8", "\u533f", "\u4f0f", "\u5b57", "\u4f8b", "\u6587", "\u4f55", "\u51e6"];
-function maskText(t) {
-  if (!maskMode || !t) return t;
-  let out = "";
-  for (const ch of t) {
-    const c = ch.codePointAt(0);
-    if (c >= 97 && c <= 122) out = out + String.fromCharCode(97 + (c * 7 + 3) % 26);        // a-z
-    else if (c >= 65 && c <= 90) out = out + String.fromCharCode(65 + (c * 7 + 3) % 26);    // A-Z
-    else if (c >= 48 && c <= 57) out = out + String.fromCharCode(48 + (c * 7 + 3) % 10);    // 0-9
-    else if (c >= 0x3040) out = out + MASK_CJK[c % MASK_CJK.length];                        // かな・漢字等
-    else out = out + ch;                                                                     // 空白・記号・罫線
-  }
-  return out;
-}
 function toggleMask() {
   maskMode = !maskMode;
   localStorage.setItem("agd-mask", maskMode ? "1" : "0");
@@ -141,58 +115,6 @@ function projColor(cwd) {
   return `hsl(${h}, 55%, 62%)`;
 }
 // ---------------- ANSI カラー → HTML ----------------
-const ANSI_FG = { 30:"#484f58",31:"#ff7b72",32:"#3fb950",33:"#d29922",34:"#58a6ff",35:"#bc8cff",36:"#39c5cf",37:"#b1bac4",90:"#6e7681",91:"#ffa198",92:"#56d364",93:"#e3b341",94:"#79c0ff",95:"#d2a8ff",96:"#56d4dd",97:"#f0f6fc" };
-function c256(n) { // xterm 256色 → rgb
-  if (n < 16) return ANSI_FG[n < 8 ? 30 + n : 90 + n - 8] ?? "#b1bac4";
-  if (n < 232) {
-    const v = [0, 95, 135, 175, 215, 255];
-    const i = n - 16;
-    return `rgb(${v[Math.floor(i / 36)]},${v[Math.floor(i / 6) % 6]},${v[i % 6]})`;
-  }
-  const g = 8 + (n - 232) * 10;
-  return `rgb(${g},${g},${g})`;
-}
-function ansiToHtml(raw) {
-  // SGR(\x1b[..m)以外の制御シーケンスは除去してからエスケープ
-  const cleaned = raw
-    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")      // OSC
-    .replace(/\x1b\[[0-9;?]*[A-LN-Za-ln-z]/g, "")          // SGR(m)以外のCSI
-    .replace(/\x1b[^\[]/g, "");
-  const st = { fg: null, bg: null, bold: false };
-  let out = "", openSpan = false;
-  const flushStyle = () => {
-    if (openSpan) { out += "</span>"; openSpan = false; }
-    const css = [];
-    if (st.fg) css.push(`color:${st.fg}`);
-    if (st.bg) css.push(`background:${st.bg}`);
-    if (st.bold) css.push("font-weight:bold");
-    if (css.length) { out += `<span style="${css.join(";")}">`; openSpan = true; }
-  };
-  const parts = cleaned.split(/\x1b\[([0-9;]*)m/);
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 0) { out += esc(maskText(parts[i])); continue; }
-    const codes = (parts[i] || "0").split(";").map(Number);
-    for (let k = 0; k < codes.length; k++) {
-      const c = codes[k];
-      if (c === 0) { st.fg = st.bg = null; st.bold = false; }
-      else if (c === 1) st.bold = true;
-      else if (c === 22) st.bold = false;
-      else if (c >= 30 && c <= 37 || c >= 90 && c <= 97) st.fg = ANSI_FG[c];
-      else if (c === 39) st.fg = null;
-      else if (c >= 40 && c <= 47) st.bg = ANSI_FG[c - 10];
-      else if (c >= 100 && c <= 107) st.bg = ANSI_FG[c - 10];
-      else if (c === 49) st.bg = null;
-      else if (c === 38 || c === 48) {
-        const isFg = c === 38;
-        if (codes[k + 1] === 5) { const col = c256(codes[k + 2] ?? 0); isFg ? st.fg = col : st.bg = col; k += 2; }
-        else if (codes[k + 1] === 2) { const col = `rgb(${codes[k+2]??0},${codes[k+3]??0},${codes[k+4]??0})`; isFg ? st.fg = col : st.bg = col; k += 4; }
-      }
-    }
-    flushStyle();
-  }
-  if (openSpan) out += "</span>";
-  return out;
-}
 function setScreen(el, raw) {
   if (el.dataset.raw === raw) return false;
   el.dataset.raw = raw;
@@ -494,9 +416,7 @@ function buildCard(key) {
 
 // 操作先の識別。ローカルは tty、リモート(ssh+tmux)は remote を持つ。
 // tty が無い＝操作不能ではないので、判定は必ずこれを通す。
-const canOperate = (s) => !!s && !!s.running && (!!s.tty || !!s.remote);
 // API に渡す宛先。サーバー側は cardKey があれば remote を優先解決する
-const target = (s) => ({ tty: s?.tty ?? "", cardKey: s?.key ?? "" });
 
 let listKey = null;  // セッションタブでの選択中セッションkey
 function updateListSelection() {
