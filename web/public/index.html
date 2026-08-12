@@ -153,6 +153,14 @@
   .resume-row.kbd-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* ピン留めした行は左端に印を付け、上位に固定されていることを示す */
   .resume-row.pinned { box-shadow: inset 3px 0 0 var(--busy); }
+  /* 行頭のピンボタン。留めていないときは薄く、留めると黄色で明示する */
+  .row-pin { background: none; border: none; padding: 0 2px; cursor: pointer; flex: none;
+             display: inline-flex; align-items: center; color: var(--dim); opacity: .28; }
+  .row-pin svg { width: 13px; height: 13px; fill: none; stroke: currentColor;
+                 stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .row-pin:hover { opacity: .8; color: var(--accent); }
+  .resume-row.pinned .row-pin { opacity: 1; color: var(--busy); }
+  .resume-row.pinned .row-pin svg path:first-child { fill: currentColor; }
   .resume-row .card-title { font-weight: 400; font-size: 12.5px; cursor: pointer; flex: 0 1 auto; max-width: 32%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-row .btn { padding: 1px 8px; font-size: 11px; }
   .resume-row .card-meta { font-size: 10.5px; }

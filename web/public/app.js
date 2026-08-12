@@ -715,6 +715,9 @@ function buildRow(s, running) {
     + (pinned.includes(s.key) ? " pinned" : "");
   row.dataset.key = s.key;
   row.innerHTML = `
+    <button class="row-pin" data-i18n-title="card.pin" title="Pin">
+      <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></svg>
+    </button>
     <span class="dot"></span>
     <span class="agent-tag">${s.agent}</span>
     <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
@@ -723,6 +726,7 @@ function buildRow(s, running) {
     <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
     <span class="card-meta"></span>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
+  row.querySelector(".row-pin").onclick = (e) => { e.stopPropagation(); togglePin(s.key); };
   row.querySelector(".card-title").innerHTML =
     esc(maskText(s.name)) + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   const sum = row.querySelector(".row-summary");
