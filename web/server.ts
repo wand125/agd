@@ -1336,8 +1336,11 @@ if (BIND !== "127.0.0.1" && BIND !== "localhost" && !TOKEN) {
   process.exit(1);
 }
 
-function authed(req: Request, url: URL): boolean {
+function authed(req: Request, url: URL, ip?: string): boolean {
   if (!TOKEN) return true;
+  // ループバック免除は実装しない。tailscale serve のようなプロキシ経由の
+  // 外部アクセスも 127.0.0.1 から来るため、免除するとトークンが無意味になる
+  // (実測で確認済み)。ローカルの agd.app には URL にトークンを埋めて渡す。
   const t = url.searchParams.get("token") || cookieOf(req, COOKIE)
     || (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   return !!t && tokenEq(t, TOKEN);
@@ -1352,7 +1355,7 @@ try {
   idleTimeout: 60,
   async fetch(req, server) {
     const url = new URL(req.url);
-    if (!authed(req, url)) {
+    if (!authed(req, url, server.requestIP(req)?.address)) {
       // ?token=... で来たら Cookie に載せ替えて以後の往復を楽にする
       return new Response("unauthorized", {
         status: 401,

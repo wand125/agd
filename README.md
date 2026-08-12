@@ -132,7 +132,9 @@ tailscale serve --bg --http=8787 http://127.0.0.1:8787
 ```
 
 Then open `http://<host>.<tailnet>.ts.net:8787/m?token=<token>` once; the token is stored in a
-cookie afterwards. Requests without it get 401. Add it to your home screen for an app-like launch.
+cookie afterwards. Requests without it get 401 — including from localhost, because a proxy like
+`tailscale serve` also connects from `127.0.0.1`, so exempting loopback would defeat the token.
+`scripts/install-macapp.sh` picks up `AGD_TOKEN` and bakes it into `agd.app` for you. Add it to your home screen for an app-like launch.
 
 | Variable | Effect |
 |---|---|

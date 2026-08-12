@@ -34,7 +34,8 @@ cat > "$PLIST" <<PLIST
   <dict>
     <!-- launchd の既定 PATH には homebrew や ~/.local/bin が無いため明示する -->
     <key>PATH</key><string>${HOME}/.local/bin:${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>AGD_PORT</key><string>${PORT}</string>${AGD_PATH_STRIP:+
+    <key>AGD_PORT</key><string>${PORT}</string>${AGD_TOKEN:+
+    <key>AGD_TOKEN</key><string>${AGD_TOKEN}</string>}${AGD_PATH_STRIP:+
     <key>AGD_PATH_STRIP</key><string>${AGD_PATH_STRIP}</string>}
   </dict>
   <key>RunAtLoad</key><true/>
@@ -98,7 +99,8 @@ cat > "$APP/Contents/Info.plist" <<INFO
   <key>CFBundleIconFile</key><string>agd.icns</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSEnvironment</key>
-  <dict><key>AGD_PORT</key><string>${PORT}</string></dict>
+  <dict><key>AGD_PORT</key><string>${PORT}</string>${AGD_TOKEN:+
+    <key>AGD_TOKEN</key><string>${AGD_TOKEN}</string>}</dict>
   <key>LSUIElement</key><false/>
 </dict>
 </plist>

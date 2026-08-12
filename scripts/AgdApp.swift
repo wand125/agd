@@ -31,8 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     }
 
     private var dashboardURL: URL {
-        let port = ProcessInfo.processInfo.environment["AGD_PORT"] ?? "8787"
-        return URL(string: "http://127.0.0.1:\(port)/")!
+        let env = ProcessInfo.processInfo.environment
+        let port = env["AGD_PORT"] ?? "8787"
+        // サーバーが AGD_TOKEN 付きで動いている場合は URL に載せる。
+        // サーバー側はループバックを免除しない(プロキシ経由の外部アクセスも
+        // 127.0.0.1 から来るため)ので、ローカルのアプリでもトークンが要る。
+        let token = env["AGD_TOKEN"] ?? ""
+        let q = token.isEmpty ? "" : "?token=\(token)"
+        return URL(string: "http://127.0.0.1:\(port)/\(q)")!
     }
 
     private func load() {
