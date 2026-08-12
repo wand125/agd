@@ -1,7 +1,6 @@
 // agd web frontend
 const $ = (id) => document.getElementById(id);
 applyStaticI18n();
-let sessions = [];
 let detailKey = null;
 let logTimer = null;
 let kbdKey = localStorage.getItem("agd-kbd-key") || null;  // 選択カード(リロード後も復元)
@@ -12,7 +11,7 @@ try { cardOrder = JSON.parse(localStorage.getItem("agd-card-order") || "[]"); } 
 function saveCardOrder() {
   // 実行中でないセッションの古いエントリが溜まりすぎたら間引く(順序は保持)
   if (cardOrder.length > 300) {
-    const live = new Set(sessions.filter(s => s.running).map(s => s.key));
+    const live = new Set(agd.sessions.filter(s => s.running).map(s => s.key));
     cardOrder = cardOrder.filter(k => live.has(k));
   }
   localStorage.setItem("agd-card-order", JSON.stringify(cardOrder));
@@ -78,54 +77,15 @@ const filters = { waiting: true, busy: true, idle: true, claude: true, codex: tr
 const PER_PAGE_LAYOUT = { 1: [1, 1], 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3] };
 
 // ---------------- ユーティリティ ----------------
-let pathStrip = "";  // AGD_PATH_STRIP で指定された共通プレフィックスを「…」に短縮
-function shortCwd(c) {
-  let s = c || "";
-  if (pathStrip && s.startsWith(pathStrip)) s = "…" + s.slice(pathStrip.length);
-  return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
-}
 // ---------------- マスクモード(スクリーンショット用) ----------------
 // 決定的スクランブル: 英字→英字・数字→数字・CJK→ダミー漢字。空白/記号/罫線は保持するので
 // レイアウトと ANSI カラーはそのまま、内容だけが読めなくなる。:mask で切替
-function toggleMask() {
-  maskMode = !maskMode;
-  localStorage.setItem("agd-mask", maskMode ? "1" : "0");
-  document.querySelectorAll(".screen").forEach(el => delete el.dataset.raw);  // 画面キャッシュ無効化
-  render();
-  if (detailKey) renderLog(false);
-  toast(maskMode ? t("toast.maskOn") : t("toast.maskOff"));
-}
-// エスケープ済みテキスト内の URL をリンク化(新しいタブで開く)。末尾の句読点や括弧は除外
-function linkify(escaped) {
-  // 日本語(かな・漢字・全角記号)はURL境界とみなして打ち切る
-  return escaped.replace(/(https?:\/\/[^\s<>"'\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]+)/g, (m) => {
-    // 末尾の句読点・括弧・Markdown記号(** など)はURLに含めない
-    const url = m.replace(/[)\]}.,;:\u3002\u3001\u300d\u300f>*_`]+$/, "");
-    return `<a href="${url}" target="_blank" rel="noopener">${url}</a>${m.slice(url.length)}`;
-  });
-}
-function projName(cwd) {
-  const parts = (cwd || "").split("/").filter(Boolean);
-  return maskText(parts[parts.length - 1] || cwd);
-}
-function projColor(cwd) {
-  let h = 0;
-  const name = projName(cwd);
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${h}, 55%, 62%)`;
+// マスクの状態は core が持つ。切替後の再描画は agd.onMaskChange 側で行う
+function toggleMaskView() {
+  toast(toggleMask() ? t("toast.maskOn") : t("toast.maskOff"));
 }
 // ---------------- ANSI カラー → HTML ----------------
-function setScreen(el, raw) {
-  if (el.dataset.raw === raw) return false;
-  el.dataset.raw = raw;
-  el.innerHTML = ansiToHtml(raw);
-  return true;
-}
 
-async function api(path, body) {
-  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return r.json();
-}
 let toastTimer = null;
 function toast(msg) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
@@ -135,7 +95,6 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.remove(), 2500);
 }
-function sessionOf(key) { return sessions.find(x => x.key === key); }
 
 // ---------------- WebSocket ----------------
 // スマホ幅で PC 版を開いたら /m を提案する。閉じたら記憶して二度と出さない
@@ -154,24 +113,13 @@ function sessionOf(key) { return sessions.find(x => x.key === key); }
 })();
 
 let assetVersion = null;   // サーバーが配る app.js/i18n.js/index.html の版
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "snapshot") {
-      // フロント資産が更新されたら自動で読み直す。agd.app(WKWebView)は
-      // 手動リロード手段が限られ、古い JS のまま動き続けると原因が掴みにくい
-      if (msg.assetVersion) {
-        if (!assetVersion) assetVersion = msg.assetVersion;
-        else if (assetVersion !== msg.assetVersion) { location.reload(); return; }
-      }
-      sessions = msg.sessions || [];
-      render();
-      (msg.changes || []).forEach(handleChange);
-    }
-  };
-  ws.onclose = () => { $("stats").textContent = t("stats.disconnected"); setTimeout(connect, 2000); };
-}
+// 接続・再接続・資産バージョン監視は core が持つ。描画はビューの仕事
+agd.onSnapshot = (list, changes) => {
+  render();
+  changes.forEach(handleChange);
+};
+agd.onDisconnect = () => { $("stats").textContent = t("stats.disconnected"); };
+agd.onMaskChange = () => { render(); if (detailKey) renderLog(false); };
 connect();
 
 // ---------------- タブ ----------------
@@ -207,7 +155,7 @@ $("notify-toggle").onchange = async (e) => {
 };
 fetch("/api/config").then(r => r.json()).then(c => {
   $("mac-notify-toggle").checked = !!c.macNotify;
-  pathStrip = c.pathStrip || "";
+  agd.pathStrip = c.pathStrip || "";
   render();
 });
 $("mac-notify-toggle").onchange = (e) => api("/api/config", { macNotify: e.target.checked });
@@ -251,7 +199,7 @@ $("bar-next").onclick = () => $("page-next").click();
 
 function visibleRunning() {
   const q = $("search").value.trim().toLowerCase();
-  return sessions.filter(s => s.running)
+  return agd.sessions.filter(s => s.running)
     .filter(s => filters[s.status] !== false && filters[s.agent] !== false)
     .filter(s => !q || s.name.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q) ||
                  (s.git?.branch ?? "").toLowerCase().includes(q));
@@ -259,7 +207,7 @@ function visibleRunning() {
 
 // ---------------- 描画 ----------------
 function render() {
-  const all = sessions.filter(s => s.running);
+  const all = agd.sessions.filter(s => s.running);
   ensureCardOrder(all);
   // 終了要求中のセッションが一覧から消えたらクリーンアップ
   for (const k of closing) if (!all.some(s => s.key === k)) closing.delete(k);
@@ -469,8 +417,8 @@ function renderList() {
   // ピン留めしたものを先頭に。ピン同士は留めた順(グリッドと同じ規則)を保つ
   const rank = (s) => { const i = pinned.indexOf(s.key); return i < 0 ? 1e9 : i; };
   const byPin = (a, b) => rank(a) - rank(b);
-  const running = sessions.filter(s => s.running).sort(byPin);
-  const resumable = sessions.filter(s => !s.running && !archived.has(s.key)).sort(byPin);
+  const running = agd.sessions.filter(s => s.running).sort(byPin);
+  const resumable = agd.sessions.filter(s => !s.running && !archived.has(s.key)).sort(byPin);
   const rr = $("running-rows");
   rr.innerHTML = "";
   running.forEach(s => rr.appendChild(buildRow(s, true)));
@@ -656,7 +604,7 @@ async function runCommand(c) {
   } else if (c === "new") {
     openNew();
   } else if (c === "mask") {
-    toggleMask();
+    toggleMaskView();
   } else if (c === "sum") {
     const key = curSelKey();
     if (!key) { toast(t("toast.sumNoSession")); return; }
@@ -1286,11 +1234,6 @@ let logStart = 0;   // logEntries[0] の全体index
 let logTotal = 0;
 
 let detailSub = null;  // 表示中のサブエージェントID(null = 本体)
-async function fetchTranscript(s, params = {}) {
-  const q = new URLSearchParams({ agent: s.agent, sid: s.sid, ...(detailSub ? { sub: detailSub } : {}), ...params });
-  const r = await fetch(`/api/transcript?${q}`);
-  return r.json();
-}
 // サブエージェント一覧をセレクタに反映(claude のみ)
 async function loadSubagents(s) {
   if (s.agent !== "claude") { $("d-sub").style.display = "none"; return; }
@@ -1351,7 +1294,7 @@ function renderLog(force) {
   const older = logStart > 0
     ? `<div class="load-older" onclick="loadOlder()">${t("detail.loadOlderCount", { n: logStart })}</div>` : "";
   log.innerHTML = older + logEntries.map((e0, idx) => {
-    const e = maskMode ? { ...e0, text: maskText(e0.text) } : e0;
+    const e = isMasked() ? { ...e0, text: maskText(e0.text) } : e0;
     const ts = e.ts ? `<span class="ts">${e.ts.slice(11, 19)}</span> ` : "";
     if (e.role === "user") return `<div class="entry user">${ts}${linkify(esc(e.text))}</div>`;
     if (e.role === "assistant") return `<div class="entry assistant">${ts}${linkify(esc(e.text))}</div>`;
@@ -1372,7 +1315,7 @@ function renderLog(force) {
       if (!s) return;
       const { entry } = await fetchTranscript(s, { entry: logStart + i });
       if (entry) {
-        const me = maskMode ? { ...entry, text: maskText(entry.text) } : entry;
+        const me = isMasked() ? { ...entry, text: maskText(entry.text) } : entry;
         const pre = el.querySelector("pre");
         pre.innerHTML = me.role === "tool_use" ? renderToolUse(me) : linkify(esc(me.text));
         full.remove();
@@ -1452,7 +1395,7 @@ async function runSearch(q) {
     row.onclick = () => {
       closeSearch();
       if (!sessionOf(`${h.agent}:${h.sid}`)) {
-        sessions.push({ key: `${h.agent}:${h.sid}`, agent: h.agent, sid: h.sid, name: h.name, cwd: h.cwd, status: "resumable", running: false, tty: "", ageS: 0 });
+        agd.sessions.push({ key: `${h.agent}:${h.sid}`, agent: h.agent, sid: h.sid, name: h.name, cwd: h.cwd, status: "resumable", running: false, tty: "", ageS: 0 });
       }
       openDetail(`${h.agent}:${h.sid}`);
     };
@@ -1475,7 +1418,7 @@ function openNew() {
   newSel = 0;
   // 候補はセッション一覧から最終アクティビティ順に(APIの一覧も合流)
   const ageByCwd = new Map();
-  sessions.forEach(s => {
+  agd.sessions.forEach(s => {
     if (!s.cwd) return;
     ageByCwd.set(s.cwd, Math.min(ageByCwd.get(s.cwd) ?? Infinity, s.ageS));
   });
@@ -1544,7 +1487,7 @@ async function launchNew(agent, cwd, create = false) {
   if (r.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent, cwd,
-    keys: new Set(sessions.filter(x => x.running).map(x => x.key)),
+    keys: new Set(agd.sessions.filter(x => x.running).map(x => x.key)),
     until: Date.now() + 30_000,
   };
   closeNew();
@@ -1564,7 +1507,7 @@ async function resumeContinue(key) {
   await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
   pendingSelect = {
     agent: s.agent, cwd: s.cwd,
-    keys: new Set(sessions.filter(x => x.running).map(x => x.key)),
+    keys: new Set(agd.sessions.filter(x => x.running).map(x => x.key)),
     until: Date.now() + 30_000,
   };
   toast(t("toast.forked", { agent: s.agent }));
