@@ -128,26 +128,6 @@ function closeDetail() {
 }
 $("dclose").onclick = closeDetail;
 
-// 左フリックで一覧へ戻る(iOS の「戻る」ジェスチャに合わせる)。
-// 縦スクロールや端末画面の横スクロールを邪魔しないよう、横移動が縦より
-// 十分大きい場合だけ反応させる。
-(function swipeBack() {
-  const el = $("detail");
-  let x0 = 0, y0 = 0, tracking = false;
-  el.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { tracking = false; return; }
-    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; tracking = true;
-  }, { passive: true });
-  el.addEventListener("touchend", (e) => {
-    if (!tracking) return;
-    tracking = false;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - x0, dy = t.clientY - y0;
-    // 右→左に 70px 以上、かつ横移動が縦の2倍以上
-    if (dx < -70 && Math.abs(dx) > Math.abs(dy) * 2) closeDetail();
-  }, { passive: true });
-})();
-
 // スクロールするのは #dbody。#dscreen / #dlog は中身なので自身では動かない
 function atBottom(margin = 60) {
   const b = $("dbody");
@@ -173,6 +153,35 @@ $("dpa").onclick = (e) => {
   const s = sessionOf(openKey);
   if (b && s) answer(s, b.dataset.a);
 };
+
+// 詳細内のスワイプ操作。
+//   左右フリック          → 画面 ⇄ ログ のタブ切替
+//   画面左端からの右フリック → 一覧へ戻る(iOS の「戻る」に合わせる)
+// 縦スクロールと端末画面の横スクロールを邪魔しないよう、横移動が縦より
+// 十分大きいときだけ反応させる。
+(function detailSwipe() {
+  const el = $("detail");
+  const TABS = ["screen", "log"];
+  let x0 = 0, y0 = 0, fromEdge = false, tracking = false;
+  el.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    fromEdge = x0 <= 24;               // 画面左端から始まったか
+    tracking = true;
+  }, { passive: true });
+  el.addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;   // 縦寄りは無視
+    if (fromEdge && dx > 0) { closeDetail(); return; }                  // 左端→右で戻る
+    const i = TABS.indexOf(dTab);
+    // 左フリックで次のタブ、右フリックで前のタブ
+    const next = TABS[Math.min(TABS.length - 1, Math.max(0, i + (dx < 0 ? 1 : -1)))];
+    if (next !== dTab) setTab(next, true);
+  }, { passive: true });
+})();
 
 $("dtabs").onclick = (e) => { const d = e.target.closest("[data-t]"); if (d) setTab(d.dataset.t); };
 function setTab(tab, force = false) {
