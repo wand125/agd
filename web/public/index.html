@@ -151,6 +151,8 @@
   .rows { display: flex; flex-direction: column; gap: 2px; }
   .resume-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
   .resume-row.kbd-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* ピン留めした行は左端に印を付け、上位に固定されていることを示す */
+  .resume-row.pinned { box-shadow: inset 3px 0 0 var(--busy); }
   .resume-row .card-title { font-weight: 400; font-size: 12.5px; cursor: pointer; flex: 0 1 auto; max-width: 32%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-row .btn { padding: 1px 8px; font-size: 11px; }
   .resume-row .card-meta { font-size: 10.5px; }

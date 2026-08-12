@@ -466,8 +466,11 @@ function syncSplitDetail() {
   openDetail(listKey);
 }
 function renderList() {
-  const running = sessions.filter(s => s.running);
-  const resumable = sessions.filter(s => !s.running && !archived.has(s.key));
+  // ピン留めしたものを先頭に。ピン同士は留めた順(グリッドと同じ規則)を保つ
+  const rank = (s) => { const i = pinned.indexOf(s.key); return i < 0 ? 1e9 : i; };
+  const byPin = (a, b) => rank(a) - rank(b);
+  const running = sessions.filter(s => s.running).sort(byPin);
+  const resumable = sessions.filter(s => !s.running && !archived.has(s.key)).sort(byPin);
   const rr = $("running-rows");
   rr.innerHTML = "";
   running.forEach(s => rr.appendChild(buildRow(s, true)));
@@ -708,7 +711,8 @@ async function resumeSession(s) {
 
 function buildRow(s, running) {
   const row = document.createElement('div');
-  row.className = "resume-row" + (closing.has(s.key) ? " closing" : "");
+  row.className = "resume-row" + (closing.has(s.key) ? " closing" : "")
+    + (pinned.includes(s.key) ? " pinned" : "");
   row.dataset.key = s.key;
   row.innerHTML = `
     <span class="dot"></span>
