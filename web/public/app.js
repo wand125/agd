@@ -183,6 +183,10 @@ function setTab(tab) {
     $(id).classList.toggle("on", on);
   // 並列では両方を出す。単独表示のときの見た目は従来どおり
   $("views").classList.toggle("split", split);
+  // 右ペインは「1枚の画面+ログ」の詳細。既存のモーダルを流用する
+  document.body.classList.toggle("split-detail", split);
+  if (split) { updateSplitTop(); setSplitPane("list"); openSplitDetail(listKey ?? kbdKey); }
+  else if (splitDetailOpen) { splitDetailOpen = false; closeDetail(); }
   $("grid-view").style.display = tab === "list" ? "none" : "";
   $("list-view").style.display = tab === "grid" ? "none" : "block";
   $("pager").style.display = tab === "list" ? "none" : "";
@@ -425,9 +429,41 @@ function buildCard(key) {
 // API に渡す宛先。サーバー側は cardKey があれば remote を優先解決する
 
 let listKey = null;  // セッションタブでの選択中セッションkey
+let splitDetailOpen = false;   // 並列ビューで右ペインに詳細を出しているか
+let splitPane = "list";        // 並列ビューでカーソルがある側: list | detail
+// ヘッダーは要素数や言語で高さが変わる。右ペインの開始位置を実測で合わせる
+function updateSplitTop() {
+  const h = Math.round($("header").getBoundingClientRect().height);
+  document.documentElement.style.setProperty("--split-top", h + "px");
+}
+addEventListener("resize", updateSplitTop);
+
+function setSplitPane(p) {
+  splitPane = p;
+  document.body.classList.toggle("pane-detail", p === "detail");
+  if (p === "detail") { detailSel = -1; updateDetailSel(); }
+  else $("d-input").blur();
+}
+// 並列ビューの右ペインに詳細を出す(モーダルと同じ実体を使い回す)
+function openSplitDetail(key) {
+  const s = sessionOf(key) ? key : (visibleRunning()[0]?.key ?? null);
+  document.body.classList.toggle("no-selection", !s);
+  if (!s) { if (splitDetailOpen) { splitDetailOpen = false; closeDetail(); } return; }
+  listKey = s;
+  updateListSelection();
+  splitDetailOpen = true;
+  openDetail(s);
+}
 function updateListSelection() {
   document.querySelectorAll("#list-view .resume-row").forEach(r =>
     r.classList.toggle("kbd-selected", r.dataset.key === listKey));
+}
+// 並列で選択が変わったら右ペインを追従させる。同じセッションなら開き直さない
+function syncSplitDetail() {
+  if (activeTab !== "split" || !listKey || detailKey === listKey) return;
+  splitDetailOpen = true;
+  document.body.classList.remove("no-selection");
+  openDetail(listKey);
 }
 function renderList() {
   const running = sessions.filter(s => s.running);
@@ -703,7 +739,10 @@ function buildRow(s, running) {
     resumeBtn.onclick = () => resumeSession(s);
   }
   row.appendChild(btns);
-  row.querySelector(".card-title").onclick = () => openDetail(s.key);
+  row.querySelector(".card-title").onclick = () => {
+    if (activeTab === "split") { listKey = s.key; updateListSelection(); syncSplitDetail(); setSplitPane("detail"); }
+    else openDetail(s.key);
+  };
   return row;
 }
 
@@ -888,6 +927,31 @@ document.addEventListener("keydown", (e) => {
   if ($("help-overlay").classList.contains("show")) {
     if (e.key === "Escape" || e.key === "?" || e.key === "q") closeHelp();
     return;
+  }
+  // ---- 並列ビュー: 左右のペインをまたいでカーソルを動かす ----
+  if (activeTab === "split" && !$("new-overlay").classList.contains("show")) {
+    const rows = [...document.querySelectorAll("#list-view .resume-row")];
+    const idx = rows.findIndex(r => r.dataset.key === listKey);
+    const setSel = (i) => {
+      const n = Math.max(0, Math.min(i, rows.length - 1));
+      listKey = rows[n]?.dataset.key ?? null;
+      updateListSelection();
+      rows[n]?.scrollIntoView({ block: "nearest" });
+      syncSplitDetail();            // 選んだセッションを右に出す
+    };
+    if (splitPane === "list") {
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return; }
+      if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return; }
+      if (e.key === "g") { setSel(0); return; }
+      if (e.key === "G") { setSel(rows.length - 1); return; }
+      // 右のペインへ渡る
+      if (e.key === "l" || e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); setSplitPane("detail"); return; }
+      if (e.key === "i") { e.preventDefault(); setSplitPane("detail"); $("d-input").focus(); return; }
+    } else {
+      // 右(詳細)にいるとき、左端で h / ← なら一覧へ戻る
+      if ((e.key === "h" || e.key === "ArrowLeft") && detailSel < 0) { e.preventDefault(); setSplitPane("list"); return; }
+      if (e.key === "Escape" && document.activeElement !== $("d-input")) { e.preventDefault(); setSplitPane("list"); return; }
+    }
   }
   if ($("overlay").classList.contains("show")) {
     // 詳細画面のノーマルモード: エントリ(ボックス)を選択して開閉する

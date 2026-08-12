@@ -62,10 +62,30 @@
   .pager button:disabled { opacity: .4; cursor: default; }
   /* ビューの器。既定は単独表示、.split で左右に並べる */
   #views { flex: 1; min-height: 0; display: flex; }
-  /* 左にセッション、右に画面。DOM 順は変えず order で入れ替える */
-  #views.split > #list-view { order: 0; flex: 0 0 38%; max-width: 460px;
+  /* 並列: 左にセッション一覧、右に詳細(1枚の画面+ログ)。
+     画面一覧(グリッド)は出さない。詳細は既存のモーダルを流用し、
+     暗幕を外して右側の領域にはめ込む。 */
+  /* 左ペインは固定幅。右は position:fixed の詳細が占めるので、
+     一覧が全幅に広がって下に潜り込まないようにする */
+  #views.split > #list-view { order: 0; flex: 0 0 var(--split-left, 460px);
+                              width: var(--split-left, 460px); min-width: 0;
                               border-right: 1px solid var(--border); display: block; }
-  #views.split > #grid-view { order: 1; flex: 1; min-width: 0; }
+  #views.split > #grid-view { display: none; }
+  body.split-detail #overlay { position: fixed; inset: var(--split-top, 76px) 0 0 var(--split-left, 460px);
+                               background: none; z-index: 5; display: block; pointer-events: none; }
+  body.split-detail #detail { margin: 0; width: 100%; height: 100%; border: none;
+                              border-left: 1px solid var(--border); border-radius: 0;
+                              pointer-events: auto; }
+  /* 右ペインに出ている間は閉じるボタンを隠す(閉じる概念が無い) */
+  body.split-detail #detail-head .close { display: none; }
+  /* どちらのペインを操作しているかを枠線で示す */
+  body.split-detail:not(.pane-detail) #list-view { box-shadow: inset 2px 0 0 var(--accent); }
+  body.split-detail.pane-detail #detail { box-shadow: inset 2px 0 0 var(--accent); }
+  /* 未選択のときの案内 */
+  #split-empty { display: none; position: fixed; inset: var(--split-top, 76px) 0 0 var(--split-left, 460px);
+                 align-items: center; justify-content: center; color: var(--dim);
+                 font-size: 13px; z-index: 4; }
+  body.split-detail.no-selection #split-empty { display: flex; }
   /* 並列時はセッション行を詰めて、限られた幅に多く収める */
   #views.split .resume-row .card-title { max-width: 46%; }
   #views.split .row-summary { display: none; }
@@ -141,6 +161,9 @@
   .modal { margin: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
   #detail { margin: 3vh auto; width: min(1500px, 96vw); height: 94vh; }
   #detail-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex: none; }
+  /* 長いセッション名で見出しが縦に伸びないよう1行に抑える */
+  #d-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 38%; flex: 0 1 auto; }
+  #detail-head .card-meta { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #detail-head .close { margin-left: auto; background: none; border: none; color: var(--dim); font-size: 20px; cursor: pointer; }
   #detail-body { flex: 1; display: flex; min-height: 0; }
   #detail-screen { width: 44%; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
@@ -255,6 +278,7 @@
   <label><input type="checkbox" id="mac-notify-toggle"> <span data-i18n="toggle.macnotify">macOS</span></label>
 </header>
 
+<div id="split-empty" data-i18n="split.pick">Select a session on the left</div>
 <div id="views">
 <div id="grid-view">
   <div class="page-bar" id="bar-prev" data-i18n-title="page.prev" title="Previous page">‹</div>
