@@ -274,6 +274,7 @@ async function openDetail(key) {
   $("ddot").className = `dot ${s.status}`;
   setTab("screen", true);
   paintDetail(s, true);
+  logOpen = new Set();          // 別セッションの開閉を持ち越さない
   $("dlog").innerHTML = `<div class="empty">${esc(t("m.loading"))}</div>`;
   await loadLog(s, true);
   clearInterval(logTimer);
@@ -391,19 +392,36 @@ function setTab(tab, force = false) {
 }
 
 let logSeq = 0;
+let logOpen = new Set();   // 詳細で開いているログエントリ(index)
 async function loadLog(s, force = false) {
   const seq = ++logSeq;
   const d = await fetchTranscript(s, { limit: 60 });
   if (seq !== logSeq || openKey !== s.key) return;   // 切替中の上書きを防ぐ
   const el = $("dlog");
   const stick = force || atBottom();
-  el.innerHTML = (d.entries || []).map(e => {
-    const text = maskText(e.text ?? "");
-    // 思考・ツールはモバイルでは畳まず1行に切り詰める(タップ対象を増やさない)
-    const brief = ["thinking", "tool_use", "tool_result"].includes(e.role);
-    const body = brief ? esc(text.replace(/\s+/g, " ").slice(0, 120)) : linkify(esc(text));
-    return `<div class="entry ${e.role}">${e.ts ? `<span class="ts">${e.ts.slice(11, 16)}</span> ` : ""}${body}</div>`;
+  // PC版と同じ形式。思考・ツール入力・結果は <details> で畳み、
+  // 見出しだけ出す。開いた状態はセッションを開いている間だけ覚える。
+  el.innerHTML = (d.entries || []).map((e0, idx) => {
+    const e = isMasked() ? { ...e0, text: maskText(e0.text) } : e0;
+    const ts = e.ts ? `<span class="ts">${e.ts.slice(11, 16)}</span> ` : "";
+    if (e.role === "user") return `<div class="entry user">${ts}${linkify(esc(e.text))}</div>`;
+    if (e.role === "assistant") return `<div class="entry assistant">${ts}${linkify(esc(e.text))}</div>`;
+    const label = e.role === "thinking" ? t("detail.thinking")
+      : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : t("detail.result");
+    const body = e.role === "tool_use" ? renderToolUse(e) : linkify(esc(e.text));
+    return `<div class="entry ${e.role}"><details data-i="${idx}"${logOpen.has(idx) ? " open" : ""}>` +
+      `<summary>${ts}${label}</summary><pre>${body}</pre></details></div>`;
   }).join("") || `<div class="empty">${esc(t("m.noLog"))}</div>`;
+  // 開閉を覚える(再描画で畳み直さないため)。
+  // ontoggle は生成直後にも発火して index がずれるので、summary のクリックで拾う
+  el.querySelectorAll("details").forEach(det => {
+    const i = Number(det.dataset.i);      // エントリ全体での位置(details だけの連番ではない)
+    const sm = det.querySelector("summary");
+    if (sm) sm.onclick = () => {
+      // クリック直後はまだ open が反転していないので、これから開くかで判断する
+      det.open ? logOpen.delete(i) : logOpen.add(i);
+    };
+  });
   if (stick) { toBottom(); requestAnimationFrame(toBottom); }
 }
 

@@ -151,6 +151,35 @@ function setScreen(el, raw) {
   return true;
 }
 
+// ---------------- ツール入力の整形 ----------------
+// Edit/Write は diff として、Bash はコマンドとして見せる。両ビューで共用する。
+function renderToolUse(e) {
+  let obj = null;
+  try { obj = JSON.parse(e.text); } catch {}
+  if (obj && typeof obj === "object") {
+    if (typeof obj.old_string === "string" && typeof obj.new_string === "string") {
+      const del = obj.old_string.split("\n").map(l => `<span class="diff-line diff-del">- ${esc(l)}</span>`).join("");
+      const add = obj.new_string.split("\n").map(l => `<span class="diff-line diff-add">+ ${esc(l)}</span>`).join("");
+      return `<span class="diff-file">${esc(obj.file_path ?? "")}</span>\n${del}${add}`;
+    }
+    if (typeof obj.content === "string" && obj.file_path) {
+      const add = obj.content.split("\n").slice(0, 200).map(l => `<span class="diff-line diff-add">+ ${esc(l)}</span>`).join("");
+      return `<span class="diff-file">${esc(obj.file_path)}</span>\n${add}`;
+    }
+    if (typeof obj.command === "string") return `$ ${linkify(esc(obj.command))}${obj.description ? `\n# ${esc(obj.description)}` : ""}`;
+    if (typeof obj.input === "string" && obj.input.includes("*** Begin Patch")) obj = obj.input;
+  }
+  const text = typeof obj === "string" ? obj : e.text;
+  if (text.includes("*** Begin Patch") || /^diff --git/m.test(text)) {
+    return text.split("\n").map(l => {
+      if (l.startsWith("+") && !l.startsWith("+++")) return `<span class="diff-line diff-add">${esc(l)}</span>`;
+      if (l.startsWith("-") && !l.startsWith("---")) return `<span class="diff-line diff-del">${esc(l)}</span>`;
+      return `<span class="diff-line">${esc(l)}</span>`;
+    }).join("");
+  }
+  return linkify(esc(e.text));
+}
+
 // ---------------- セッション ----------------
 function sessionOf(key) { return agd.sessions.find(x => x.key === key); }
 // 操作先の識別。ローカルは tty、リモート(ssh+tmux)は remote を持つ。
