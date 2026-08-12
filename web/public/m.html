@@ -174,6 +174,23 @@
   @keyframes promptIn { from { transform: translateY(8px); opacity: 0; } }
   #dpq { font-size: 12px; color: var(--waiting); margin-bottom: 6px; }
 
+  /* 長押しで出す起動メニュー(下から出るシート) */
+  #sheet-bg { position: fixed; inset: 0; background: rgba(1,4,9,.6); z-index: 40;
+              display: none; align-items: flex-end; }
+  #sheet-bg.on { display: flex; animation: fadeIn .15s ease-out; }
+  #sheet { width: 100%; background: var(--panel); border-top: 1px solid var(--border);
+           border-radius: 14px 14px 0 0; padding: 10px 12px calc(var(--safe-bottom) + 10px);
+           display: flex; flex-direction: column; gap: 8px;
+           animation: sheetUp .2s cubic-bezier(.2,.8,.2,1); }
+  #sheet-title { font-size: 12px; color: var(--dim); padding: 4px 4px 2px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet-btn { width: 100%; padding: 14px; font-size: 15px; border-radius: 10px;
+               background: #21262d; border: 1px solid var(--border); color: var(--fg); }
+  .sheet-btn:active { background: var(--accent); color: #0d1117; }
+  .sheet-btn.cancel { background: none; color: var(--dim); }
+  @keyframes sheetUp { from { transform: translateY(100%); } }
+  @keyframes fadeIn { from { opacity: 0; } }
+
   .toast { animation: toastIn .18s ease-out;
            position: fixed; left: 50%; transform: translateX(-50%);
            bottom: calc(var(--safe-bottom) + 70px); background: #21262d; color: var(--fg);
@@ -185,7 +202,7 @@
   @media (prefers-reduced-motion: reduce) {
     #detail, #list { transition: none; }
     #filters, #qwrap { animation: none; }
-    #dprompt, .toast { animation: none; }
+    #dprompt, .toast, #sheet, #sheet-bg { animation: none; }
   }
 </style>
 
@@ -203,6 +220,16 @@
 <div id="qwrap"><input id="q" data-i18n-ph="m.searchPh" placeholder="Filter" autocomplete="off"></div>
 <div id="filters"></div>
 <div id="list"></div>
+
+<!-- 行の長押しで出す起動メニュー。外側タップで閉じる -->
+<div id="sheet-bg">
+  <div id="sheet">
+    <div id="sheet-title"></div>
+    <button class="sheet-btn" id="sheet-new" data-i18n="m.launchNew">New session here</button>
+    <button class="sheet-btn" id="sheet-dup" data-i18n="m.launchDup">Duplicate</button>
+    <button class="sheet-btn cancel" id="sheet-cancel" data-i18n="m.cancel">Cancel</button>
+  </div>
+</div>
 
 <div id="detail">
   <div id="dhead">

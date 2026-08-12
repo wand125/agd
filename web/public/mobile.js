@@ -60,6 +60,7 @@ function renderCounts() {
 
 let swiping = false;      // 行スワイプ中は再描画を止める
 let swipeAt = 0;          // スワイプを開始した時刻(固着の検知に使う)
+let heldRecently = false; // 直前に長押しでメニューを出したか(タップの誤発火を防ぐ)
 function renderList() {
   renderCounts();
   // スワイプ中は描き直さない(対象行が別要素になり操作が壊れるため)。
@@ -109,6 +110,8 @@ $("list").onclick = (e) => {
     return;
   }
   const row = e.target.closest(".row");
+  // 長押しでメニューを出した直後の click は無視する(詳細が開いてしまうため)
+  if (heldRecently) { heldRecently = false; return; }
   if (row) openDetail(row.dataset.k);
 };
 
@@ -162,7 +165,9 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
 (function listSwipe() {
   const list = $("list");
   const THRESHOLD = 64;          // これ以上で確定
-  let row = null, key = null, x0 = 0, y0 = 0, dir = null;   // dir: null=未判定 "h"=横 "v"=縦
+  let row = null, key = null, x0 = 0, y0 = 0, dir = null;
+  let holdTimer = null;   // 長押し(起動メニュー)のタイマー
+  const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
 
   const reset = (animate) => {
     if (!row) return;
@@ -173,6 +178,17 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     row = key = dir = null;
   };
 
+  const finish = (fire) => {
+    cancelHold();
+    if (!row) { swiping = false; return; }
+    const fired = fire && dir === "h" && row.classList.contains("armed");
+    const k = key;
+    row.classList.remove("armed");
+    reset(true);
+    swiping = false;
+    if (fired && k) togglePin(k);      // ここで renderList が走り一覧が最新になる
+    else renderList();                 // 止めていた間の更新を反映
+  };
   list.addEventListener("touchstart", (e) => {
     reset(false);
     if (e.touches.length !== 1) return;
@@ -182,12 +198,16 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     x0 = t.clientX; y0 = t.clientY; dir = null;
     swiping = !!row;
     swipeAt = Date.now();
+    heldRecently = false;
+    cancelHold();
+    if (row) holdTimer = setTimeout(() => { heldRecently = true; const k = key; finish(false); openSheet(k); }, 500);
   }, { passive: true });
 
   list.addEventListener("touchmove", (e) => {
     if (!row || e.touches.length !== 1) return;
     const t = e.touches[0];
     const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) cancelHold();
     if (!dir) {
       if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
       dir = Math.abs(dx) > Math.abs(dy) * 1.2 ? "h" : "v";
@@ -200,21 +220,45 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     row.classList.toggle("armed", dx >= THRESHOLD);
   }, { passive: true });
 
-  const finish = (fire) => {
-    if (!row) { swiping = false; return; }
-    const fired = fire && dir === "h" && row.classList.contains("armed");
-    const k = key;
-    row.classList.remove("armed");
-    reset(true);
-    swiping = false;
-    if (fired && k) togglePin(k);      // ここで renderList が走り一覧が最新になる
-    else renderList();                 // 止めていた間の更新を反映
-  };
   list.addEventListener("touchend", () => finish(true), { passive: true });
   // 着信やシステムジェスチャで touchend が来ないことがある。ここで解除しないと
   // swiping が立ったままになり、一覧が更新されず古い表示のまま固まる
   list.addEventListener("touchcancel", () => finish(false), { passive: true });
 })();
+
+
+// ---------------- 長押しの起動メニュー ----------------
+// 行を長押しすると「このプロジェクトで新規 / 複製」を出す。
+// 外側タップ・キャンセル・戻るジェスチャで閉じる。
+let sheetKey = null;
+function openSheet(key) {
+  const s = sessionOf(key);
+  if (!s) return;
+  sheetKey = key;
+  $("sheet-title").textContent = `${projName(s.cwd)} · ${s.agent}`;
+  $("sheet-bg").classList.add("on");
+  if (navigator.vibrate) navigator.vibrate(10);   // 長押しが効いたことを触感で返す
+}
+function closeSheet() { $("sheet-bg").classList.remove("on"); sheetKey = null; }
+
+// 背景(シート外)のタップで閉じる
+$("sheet-bg").onclick = (e) => { if (e.target === $("sheet-bg")) closeSheet(); };
+$("sheet-cancel").onclick = closeSheet;
+
+// 新規: 同じプロジェクト・同じエージェントで、まっさらなセッションを立てる
+// 複製: 会話を引き継いで別セッションとして分岐する(PC版の Ctrl+C と同じ)
+async function launchFrom(key, dup) {
+  const s = sessionOf(key);
+  if (!s?.cwd) { toast(t("m.launchFailed")); return; }
+  closeSheet();
+  let r;
+  if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
+  else r = await api("/api/new", { agent: s.agent, cwd: s.cwd });
+  toast((r.result || "").startsWith("ok") ? t("m.launched", { name: projName(s.cwd) })
+                                          : t("m.launchFailed"));
+}
+$("sheet-new").onclick = () => launchFrom(sheetKey, false);
+$("sheet-dup").onclick = () => launchFrom(sheetKey, true);
 
 // ---------------- 詳細 ----------------
 async function openDetail(key) {

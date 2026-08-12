@@ -11,6 +11,11 @@ const STRINGS = {
   en: {
     // ---- mobile ----
     "m.empty": "No sessions match",
+    "m.launchNew": "New session here",
+    "m.launchDup": "Duplicate this session",
+    "m.cancel": "Cancel",
+    "m.launched": "▶ Launched in {name}",
+    "m.launchFailed": "Could not launch",
     "m.loading": "Loading…",
     "m.noLog": "No log entries",
     "m.screenUnavailable": "(screen unavailable)",
@@ -230,6 +235,11 @@ const STRINGS = {
   ja: {
     // ---- mobile ----
     "m.empty": "該当するセッションがありません",
+    "m.launchNew": "このプロジェクトで新規",
+    "m.launchDup": "このセッションを複製",
+    "m.cancel": "キャンセル",
+    "m.launched": "▶ {name} で起動しました",
+    "m.launchFailed": "起動できませんでした",
     "m.loading": "読み込み中…",
     "m.noLog": "ログがありません",
     "m.screenUnavailable": "(画面を取得できません)",
