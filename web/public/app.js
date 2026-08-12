@@ -72,7 +72,7 @@ function followSelection() {
   page = Math.floor(idx / Number($("per-page").value));
 }
 let page = Number(localStorage.getItem("agd-page")) || 0;  // 表示ページ(リロード後も復元)
-let activeTab = "grid";         // grid | list
+let activeTab = localStorage.getItem("agd-tab") || "grid";   // grid | list | split
 const screenScrolled = new Set(); // 手動スクロール中(自動追従を止める)カードのkey
 const filters = { waiting: true, busy: true, idle: true, claude: true, codex: true };
 const PER_PAGE_LAYOUT = { 1: [1, 1], 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3] };
@@ -177,15 +177,20 @@ connect();
 // ---------------- タブ ----------------
 function setTab(tab) {
   activeTab = tab;
-  $("tab-grid").classList.toggle("on", tab === "grid");
-  $("tab-list").classList.toggle("on", tab === "list");
-  $("grid-view").style.display = tab === "grid" ? "" : "none";
-  $("list-view").style.display = tab === "list" ? "block" : "none";
-  $("pager").style.display = tab === "grid" ? "" : "none";
+  localStorage.setItem("agd-tab", tab);
+  const split = tab === "split";
+  for (const [id, on] of [["tab-grid", tab === "grid"], ["tab-list", tab === "list"], ["tab-split", split]])
+    $(id).classList.toggle("on", on);
+  // 並列では両方を出す。単独表示のときの見た目は従来どおり
+  $("views").classList.toggle("split", split);
+  $("grid-view").style.display = tab === "list" ? "none" : "";
+  $("list-view").style.display = tab === "grid" ? "none" : "block";
+  $("pager").style.display = tab === "list" ? "none" : "";
   render();
 }
 $("tab-grid").onclick = () => setTab("grid");
 $("tab-list").onclick = () => setTab("list");
+$("tab-split").onclick = () => setTab("split");
 
 // ---------------- 通知 ----------------
 $("notify-toggle").checked = localStorage.getItem("agd-notify") === "1";
@@ -272,8 +277,9 @@ function render() {
   $("stats").textContent = t("stats.counts", counts);
   $("tab-grid-badge").textContent = counts.waiting ? `▲${counts.waiting}` : "";
   document.title = (counts.waiting ? `(${counts.waiting}) ` : "") + "agd — Agent Dashboard";
-  if (activeTab === "grid") renderGrid();
-  else renderList();
+  // 並列表示では両方を描く。単独表示のときは見えている側だけ
+  if (activeTab !== "list") renderGrid();
+  if (activeTab !== "grid") renderList();
 }
 
 // 表示順を確定(固定順/状態順 → ピン留めを先頭へ)。renderGrid と followSelection で共用
@@ -563,7 +569,7 @@ $("cmd-input").onblur = () => closeCmdline();  // 外側クリックでも閉じ
 function curSelKey() {
   // 詳細ポップアップ表示中はそのセッションをコマンドの対象にする
   if ($("overlay").classList.contains("show") && detailKey) return detailKey;
-  return activeTab === "grid" ? kbdKey : listKey;
+  return activeTab === "list" ? listKey : kbdKey;
 }
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
 async function sendNamedKey(k, label) {
@@ -910,10 +916,14 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeSearch();
     return;
   }
-  if (e.key === "t") { setTab(activeTab === "grid" ? "list" : "grid"); return; }
+  if (e.key === "t") {
+    const order = ["list", "split", "grid"];   // タブの並び順にトグルする
+    setTab(order[(order.indexOf(activeTab) + 1) % order.length]);
+    return;
+  }
   if (e.key === ":") { e.preventDefault(); openCmdline(); return; }
   if (e.key === "?") { e.preventDefault(); toggleHelp(); return; }
-  if (activeTab !== "grid") {
+  if (activeTab === "list") {
     // セッションタブ: vim風の行選択と操作
     const rows = [...document.querySelectorAll("#list-view .resume-row")];
     const idx = rows.findIndex(r => r.dataset.key === listKey);
@@ -1449,3 +1459,7 @@ $("new-cwd").onkeydown = (e) => {
   else if (e.key === "Enter") launchFromPalette();
   else if (e.key === "Escape") $("new-cwd").blur();  // vim風: Esc でパレットのノーマルモードへ
 };
+
+// 前回のタブを復元(既定は画面一覧)。render を伴うので、
+// 後方の const 宣言がすべて評価された最後に呼ぶ
+setTab(activeTab);

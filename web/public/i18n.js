@@ -37,6 +37,7 @@ const STRINGS = {
     // ---- header ----
     "tab.grid": "Screens",
     "tab.list": "Sessions",
+    "tab.split": "Split view",
     "search.placeholder": "Filter / Enter for full-text search",
     "sort.stable": "Fixed",
     "sort.status": "By status",
@@ -254,6 +255,7 @@ const STRINGS = {
     // ---- header ----
     "tab.grid": "画面一覧",
     "tab.list": "セッション",
+    "tab.split": "並列表示",
     "search.placeholder": "絞り込み / Enterで全文検索",
     "sort.stable": "固定順",
     "sort.status": "状態順",
