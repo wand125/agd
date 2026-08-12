@@ -928,6 +928,17 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" || e.key === "?" || e.key === "q") closeHelp();
     return;
   }
+  // タブ切替はどのビューより先に処理する。並列ビューでは詳細が常時開いており、
+  // モーダル用の分岐で return されて後方まで届かないため
+  if (e.key === "t" && !$("new-overlay").classList.contains("show")
+      && !$("help-overlay").classList.contains("show")
+      && !$("search-overlay").classList.contains("show")
+      && !$("attach-overlay").classList.contains("show")) {
+    const order = ["split", "list", "grid"];   // タブの並び順に巡回する
+    setTab(order[(order.indexOf(activeTab) + 1) % order.length]);
+    return;
+  }
+
   // ---- 並列ビュー: 左右のペインをまたいでカーソルを動かす ----
   if (activeTab === "split" && !$("new-overlay").classList.contains("show")) {
     const rows = [...document.querySelectorAll("#list-view .resume-row")];
@@ -978,11 +989,6 @@ document.addEventListener("keydown", (e) => {
   }
   if ($("search-overlay").classList.contains("show")) {
     if (e.key === "Escape") closeSearch();
-    return;
-  }
-  if (e.key === "t") {
-    const order = ["list", "split", "grid"];   // タブの並び順にトグルする
-    setTab(order[(order.indexOf(activeTab) + 1) % order.length]);
     return;
   }
   if (e.key === ":") { e.preventDefault(); openCmdline(); return; }
