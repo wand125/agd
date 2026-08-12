@@ -107,10 +107,10 @@ async function openDetail(key) {
   $("dtitle").textContent = maskText(s.name);
   $("dmeta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
   $("ddot").className = `dot ${s.status}`;
-  setTab("screen");
-  paintDetail(s);
+  setTab("screen", true);
+  paintDetail(s, true);
   $("dlog").innerHTML = `<div class="empty">読み込み中…</div>`;
-  await loadLog(s);
+  await loadLog(s, true);
   clearInterval(logTimer);
   logTimer = setInterval(async () => {
     const cur = sessionOf(openKey);
@@ -126,10 +126,17 @@ function closeDetail() {
 }
 $("dclose").onclick = closeDetail;
 
-function paintDetail(s) {
-  const el = $("dscreen");
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  if (setScreen(el, s.screen ?? "(画面を取得できません)") && atBottom) el.scrollTop = el.scrollHeight;
+// スクロールするのは #dbody。#dscreen / #dlog は中身なので自身では動かない
+function atBottom(margin = 60) {
+  const b = $("dbody");
+  return b.scrollTop + b.clientHeight >= b.scrollHeight - margin;
+}
+function toBottom() { const b = $("dbody"); b.scrollTop = b.scrollHeight; }
+
+function paintDetail(s, force = false) {
+  const stick = force || atBottom();
+  if (setScreen($("dscreen"), s.screen ?? "(画面を取得できません)") && stick) toBottom();
+  if (force) toBottom();
   // 入力待ちなら応答ボタンを出す
   const p = s.prompt;
   if (!readOnly && s.status === "waiting" && p?.options?.length) {
@@ -146,21 +153,24 @@ $("dpa").onclick = (e) => {
 };
 
 $("dtabs").onclick = (e) => { const d = e.target.closest("[data-t]"); if (d) setTab(d.dataset.t); };
-function setTab(tab) {
+function setTab(tab, force = false) {
   dTab = tab;
   document.querySelectorAll("#dtabs div").forEach(d => d.classList.toggle("on", d.dataset.t === tab));
   $("dscreen").style.display = tab === "screen" ? "" : "none";
   $("dlog").style.display = tab === "log" ? "" : "none";
-  if (tab === "log") { const s = sessionOf(openKey); if (s) loadLog(s); }
+  const s = sessionOf(openKey);
+  if (tab === "log" && s) loadLog(s, force);
+  // タブを切り替えたら常に最新(最下部)から見せる
+  toBottom(); requestAnimationFrame(toBottom);
 }
 
 let logSeq = 0;
-async function loadLog(s) {
+async function loadLog(s, force = false) {
   const seq = ++logSeq;
   const d = await fetchTranscript(s, { limit: 60 });
   if (seq !== logSeq || openKey !== s.key) return;   // 切替中の上書きを防ぐ
   const el = $("dlog");
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+  const stick = force || atBottom();
   el.innerHTML = (d.entries || []).map(e => {
     const text = maskText(e.text ?? "");
     // 思考・ツールはモバイルでは畳まず1行に切り詰める(タップ対象を増やさない)
@@ -168,7 +178,7 @@ async function loadLog(s) {
     const body = brief ? esc(text.replace(/\s+/g, " ").slice(0, 120)) : linkify(esc(text));
     return `<div class="entry ${e.role}">${e.ts ? `<span class="ts">${e.ts.slice(11, 16)}</span> ` : ""}${body}</div>`;
   }).join("") || `<div class="empty">ログがありません</div>`;
-  if (atBottom) el.scrollTop = el.scrollHeight;
+  if (stick) { toBottom(); requestAnimationFrame(toBottom); }
 }
 
 // ---------------- 送信 ----------------
