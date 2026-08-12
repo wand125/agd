@@ -222,6 +222,7 @@ async function openDetail(key) {
   if (!s) return;
   openKey = key;
   $("detail").classList.add("on");
+  document.body.classList.add("detail-open");   // 背後の一覧を奥へ引く
   $("dtitle").innerHTML = esc(maskText(s.name))
     + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   $("dmeta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
@@ -245,6 +246,7 @@ async function openDetail(key) {
 function closeDetail() {
   saveDraft(openKey, $("dinput").value.trim());   // 書きかけを残して戻る
   $("detail").classList.remove("on");
+  document.body.classList.remove("detail-open");
   openKey = null;
   clearInterval(logTimer);
 }
