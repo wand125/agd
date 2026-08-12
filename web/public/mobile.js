@@ -228,7 +228,9 @@ function setTab(tab, force = false) {
   $("dlog").style.display = tab === "log" ? "" : "none";
   const s = sessionOf(openKey);
   if (tab === "log" && s) loadLog(s, force);
-  // タブを切り替えたら常に最新(最下部)から見せる
+  // タブを切り替えたら常に最新(縦は最下部)を、行頭(横は左端)から見せる。
+  // 横位置を戻さないと、前回スクロールした桁のまま表示されて読み始めが分からない
+  $("dscreen").scrollLeft = 0;
   toBottom(); requestAnimationFrame(toBottom);
 }
 
