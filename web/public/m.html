@@ -169,20 +169,20 @@
   <h1>agd</h1>
   <span id="conn" style="font-size:11px;color:var(--dim)"></span>
   <span class="counts" id="counts"></span>
-  <button class="hbtn" id="btn-q" aria-label="検索">
+  <button class="hbtn" id="btn-q" aria-label="Search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
   </button>
-  <button class="hbtn" id="btn-f" aria-label="絞り込み">
+  <button class="hbtn" id="btn-f" aria-label="Filter">
     <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
   </button>
 </header>
-<div id="qwrap"><input id="q" placeholder="絞り込み" autocomplete="off"></div>
+<div id="qwrap"><input id="q" data-i18n-ph="m.searchPh" placeholder="Filter" autocomplete="off"></div>
 <div id="filters"></div>
 <div id="list"></div>
 
 <div id="detail">
   <div id="dhead">
-    <button class="hbtn" id="dback" aria-label="戻る">
+    <button class="hbtn" id="dback" aria-label="Back">
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
     </button>
     <span class="dot" id="ddot"></span>
@@ -192,8 +192,8 @@
     </div>
   </div>
   <div id="dtabs">
-    <div data-t="screen" class="on">画面</div>
-    <div data-t="log">ログ</div>
+    <div data-t="screen" class="on" data-i18n="m.tab.screen">Screen</div>
+    <div data-t="log" data-i18n="m.tab.log">Log</div>
   </div>
   <div id="dbody">
     <div id="dscreen"></div>
@@ -201,8 +201,8 @@
   </div>
   <div id="dprompt"><div id="dpq"></div><div class="answers" id="dpa"></div></div>
   <div id="dsend">
-    <input id="dinput" placeholder="送信…" autocomplete="off" enterkeyhint="send">
-    <button id="dsendbtn">送信</button>
+    <input id="dinput" data-i18n-ph="m.sendPh" placeholder="Send…" autocomplete="off" enterkeyhint="send">
+    <button id="dsendbtn" data-i18n="m.send">Send</button>
   </div>
 </div>
 

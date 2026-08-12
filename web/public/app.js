@@ -1070,6 +1070,7 @@ async function openDetail(key) {
   await loadLog(s, true);
   clearInterval(logTimer);
   logTimer = setInterval(() => {
+    if (document.hidden) return;   // 背面では更新しない
     const cur = sessionOf(detailKey);
     if (cur) {
       if (cur.screen && setScreen($("d-screen"), cur.screen)) {

@@ -20,8 +20,8 @@ try { pinned = JSON.parse(localStorage.getItem("agd-pinned-keys") || "[]"); } ca
 function togglePin(key) {
   const i = pinned.indexOf(key);
   const s = sessionOf(key);
-  if (i >= 0) { pinned.splice(i, 1); toast(`ピン解除: ${maskText(s?.name ?? key)}`); }
-  else { pinned.push(key); toast(`📌 ${maskText(s?.name ?? key)}`); }
+  if (i >= 0) { pinned.splice(i, 1); toast(t("m.unpinned", { name: maskText(s?.name ?? key) })); }
+  else { pinned.push(key); toast(t("m.pinned", { name: maskText(s?.name ?? key) })); }
   try { localStorage.setItem("agd-pinned-keys", JSON.stringify(pinned)); } catch {}
   renderList();
 }
@@ -64,7 +64,7 @@ function renderList() {
   if (swiping) return;    // 描き直すと対象行が別要素になり操作が壊れる
   const list = visible();
   const el = $("list");
-  if (!list.length) { el.innerHTML = `<div class="empty">該当するセッションがありません</div>`; return; }
+  if (!list.length) { el.innerHTML = `<div class="empty">${esc(t("m.empty"))}</div>`; return; }
   el.innerHTML = list.map(s => {
     const host = s.remote ? `<span class="host">${esc(s.remote.host)}</span>` : "";
     // 入力待ちは一覧から直接答えられるようにする(詳細を開かせない)
@@ -74,7 +74,7 @@ function renderList() {
       : "";
     const isPinned = pinned.includes(s.key);
     return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${escAttr(s.key)}"
-      data-action="${isPinned ? "📌\n解除" : "📌\nピン"}">
+      data-action="${escAttr(isPinned ? t("m.actionUnpin") : t("m.actionPin"))}">
       <span class="dot ${s.status}"></span>
       <div class="body">
         <div class="line1">
@@ -104,14 +104,14 @@ $("list").onclick = (e) => {
 
 async function answer(s, n) {
   const r = await answerPrompt(s, Number(n));
-  toast(r ? "送信しました" : "応答できませんでした");
+  toast(t(r ? "m.sent" : "m.answerFailed"));
 }
 
 // ---------------- フィルタ ----------------
 function renderFilters() {
   $("filters").innerHTML = STATUSES.map(s =>
     `<span class="chip ${filter.has(s) ? "on" : ""}" data-s="${s}">${
-      { waiting: "▲ 入力待ち", busy: "● 実行中", idle: "○ 待機", resumable: "resume可" }[s]}</span>`).join("");
+      { waiting: t("m.f.waiting"), busy: t("m.f.busy"), idle: t("m.f.idle"), resumable: t("m.f.resumable") }[s]}</span>`).join("");
 }
 $("filters").onclick = (e) => {
   const c = e.target.closest(".chip");
@@ -196,10 +196,13 @@ async function openDetail(key) {
   $("ddot").className = `dot ${s.status}`;
   setTab("screen", true);
   paintDetail(s, true);
-  $("dlog").innerHTML = `<div class="empty">読み込み中…</div>`;
+  $("dlog").innerHTML = `<div class="empty">${esc(t("m.loading"))}</div>`;
   await loadLog(s, true);
   clearInterval(logTimer);
   logTimer = setInterval(async () => {
+    // 背面に回っている間は更新しない(モバイルの通信とバッテリーを無駄にしない)。
+    // 復帰時は visibilitychange で即座に描き直す
+    if (document.hidden) return;
     const cur = sessionOf(openKey);
     if (!cur) return;
     paintDetail(cur);
@@ -223,7 +226,7 @@ function toBottom() { const b = $("dbody"); b.scrollTop = b.scrollHeight; }
 
 function paintDetail(s, force = false) {
   const stick = force || atBottom();
-  if (setScreen($("dscreen"), s.screen ?? "(画面を取得できません)") && stick) toBottom();
+  if (setScreen($("dscreen"), s.screen ?? t("m.screenUnavailable")) && stick) toBottom();
   if (force) toBottom();
   // 入力待ちなら応答ボタンを出す
   const p = s.prompt;
@@ -321,7 +324,7 @@ async function loadLog(s, force = false) {
     const brief = ["thinking", "tool_use", "tool_result"].includes(e.role);
     const body = brief ? esc(text.replace(/\s+/g, " ").slice(0, 120)) : linkify(esc(text));
     return `<div class="entry ${e.role}">${e.ts ? `<span class="ts">${e.ts.slice(11, 16)}</span> ` : ""}${body}</div>`;
-  }).join("") || `<div class="empty">ログがありません</div>`;
+  }).join("") || `<div class="empty">${esc(t("m.noLog"))}</div>`;
   if (stick) { toBottom(); requestAnimationFrame(toBottom); }
 }
 
@@ -330,13 +333,13 @@ async function send() {
   const s = sessionOf(openKey);
   const text = $("dinput").value.trim();
   if (!s || !text) return;
-  if (!canOperate(s)) { toast("実行中のセッションではありません"); return; }
+  if (!canOperate(s)) { toast(t("m.notRunning")); return; }
   $("dinput").value = "";
   const r = await sendText(s, text);
   const ok = (r.result || "").startsWith("ok");
   if (ok) saveDraft(s.key, "");
   else { $("dinput").value = text; saveDraft(s.key, text); }   // 失敗時は打ち直させない
-  toast(ok ? "送信しました" : "送信に失敗しました");
+  toast(t(ok ? "m.sent" : "m.sendFailed"));
 }
 $("dsendbtn").onclick = send;
 $("dinput").oninput = () => saveDraft(openKey, $("dinput").value.trim());
@@ -355,9 +358,9 @@ function toast(msg) {
 
 // ---------------- 起動 ----------------
 agd.onSnapshot = (sessions, changes) => {
-  $("conn").textContent = readOnly ? "閲覧のみ" : "";
+  $("conn").textContent = readOnly ? t("m.readOnly") : "";
   // 詰まりが増えた瞬間だけ知らせる(監視盤の主目的)
-  for (const c of changes) if (c.to === "waiting") toast(`▲ ${c.name} が入力待ちです`);
+  for (const c of changes) if (c.to === "waiting") toast(t("m.needsInput", { name: c.name }));
   // 描画は最短1秒間隔。スクロール中に頻繁に差し替えない
   if (Date.now() - lastRender > 1000 || !$("list").children.length) {
     lastRender = Date.now();
@@ -366,16 +369,24 @@ agd.onSnapshot = (sessions, changes) => {
   const s = sessionOf(openKey);
   if (s) paintDetail(s);
 };
-agd.onDisconnect = () => { $("conn").textContent = "接続待ち…"; };
+agd.onDisconnect = () => { $("conn").textContent = t("m.connecting"); };
+// 前面に戻ったら止めていた分を取り戻す
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  renderList();
+  const s = sessionOf(openKey);
+  if (s) { paintDetail(s); if (dTab === "log") loadLog(s); }
+});
 agd.onMaskChange = renderList;
 
+applyStaticI18n();   // HTML 側の静的文言を現在の言語に差し替える
 renderFilters();
 loadConfig().then(c => {
   readOnly = !!c.readOnly;
   if (readOnly) {
     // 送信手段を出さない。押せるのに 403 になる状態が一番わかりにくい
     $("dsend").style.display = "none";
-    $("conn").textContent = "閲覧のみ";
+    $("conn").textContent = t("m.readOnly");
   }
   connect();
 });
