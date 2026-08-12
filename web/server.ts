@@ -1298,18 +1298,78 @@ async function poll() {
 // ---------------------------------------------------------------- HTTP サーバー
 const INDEX_HTML = join(import.meta.dir, "public", "index.html");
 
+// ---- アクセス制御 ----
+// 既定は 127.0.0.1 バインドで到達者＝本人なので認証不要。tailscale serve 等で
+// LAN/tailnet に出す場合のみ AGD_TOKEN を設定する。到達できる者はセッションへ
+// コマンドを送れるため、公開時は多重防御としてトークンを要求する。
+const TOKEN = (process.env.AGD_TOKEN || "").trim();
+const BIND = process.env.AGD_BIND || "127.0.0.1";
+// 送信系を止める。スマホからは監視だけしたい場合に使う
+const READONLY = /^(1|true|yes)$/i.test(process.env.AGD_READONLY || "");
+const COOKIE = "agd_token";
+// 書き込み系(セッションを操作する)API。READONLY ではここを拒否する
+const MUTATING = new Set([
+  "/api/send", "/api/key", "/api/close", "/api/new", "/api/resume",
+  "/api/remote-attach", "/api/remotes", "/api/config", "/api/summarize",
+]);
+
+function cookieOf(req: Request, name: string): string {
+  const raw = req.headers.get("cookie") ?? "";
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return "";
+}
+// 長さを揃えてから比較し、タイミング差で桁が漏れないようにする
+function tokenEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+// 事故防止: localhost 以外に出すのにトークンが無い構成は起動させない。
+// この状態は「到達できる誰でもターミナルを操作できる」ことを意味する。
+if (BIND !== "127.0.0.1" && BIND !== "localhost" && !TOKEN) {
+  console.error("AGD_BIND で外部に公開する場合は AGD_TOKEN が必須です(未設定のため起動を中止)");
+  console.error(`例: AGD_TOKEN=$(openssl rand -hex 24) AGD_BIND=${BIND} agd web`);
+  process.exit(1);
+}
+
+function authed(req: Request, url: URL): boolean {
+  if (!TOKEN) return true;
+  const t = url.searchParams.get("token") || cookieOf(req, COOKIE)
+    || (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  return !!t && tokenEq(t, TOKEN);
+}
+
 try {
   Bun.serve({
   port: PORT,
-  hostname: "127.0.0.1",  // セッションへのコマンド送信が可能なため、必ず localhost のみにバインドする
+  // 既定は 127.0.0.1。セッションへコマンドを送れるため、外に出すときは
+  // AGD_BIND と AGD_TOKEN を必ず併用する(下の起動時チェックで警告する)
+  hostname: BIND,
   idleTimeout: 60,
   async fetch(req, server) {
     const url = new URL(req.url);
+    if (!authed(req, url)) {
+      // ?token=... で来たら Cookie に載せ替えて以後の往復を楽にする
+      return new Response("unauthorized", {
+        status: 401,
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+      });
+    }
+    // 正しいトークンが URL で来たら Cookie に保存(以後はパラメータ不要)
+    const setCookie = TOKEN && url.searchParams.get("token") === TOKEN
+      ? { "Set-Cookie": `${COOKIE}=${encodeURIComponent(TOKEN)}; Path=/; Max-Age=31536000; SameSite=Lax` }
+      : undefined;
+    if (READONLY && req.method === "POST" && MUTATING.has(url.pathname))
+      return Response.json({ error: "read-only mode" }, { status: 403 });
     if (url.pathname === "/ws") {
       if (server.upgrade(req)) return undefined as any;
       return new Response("upgrade failed", { status: 400 });
     }
-    const noCache = { "Cache-Control": "no-store" };
+    const noCache = { "Cache-Control": "no-store", ...(setCookie ?? {}) };
     if (url.pathname === "/" || url.pathname === "/index.html")
       return new Response(Bun.file(INDEX_HTML), { headers: noCache });
     // モバイルビュー(別ビュー。共通ロジックは core.js を共有する)
@@ -1361,7 +1421,7 @@ try {
       }
       // AGD_PATH_STRIP: 表示上「…」に短縮する共通パスプレフィックス(例: ~/projects)
       const pathStrip = (process.env.AGD_PATH_STRIP ?? "").replace(/^~(?=\/|$)/, HOME);
-      return Response.json({ ...config, pathStrip });
+      return Response.json({ ...config, pathStrip, readOnly: READONLY });
     }
     if (req.method === "POST" && url.pathname === "/api/key") {
       const { tty, key, keys, cardKey } = await req.json();

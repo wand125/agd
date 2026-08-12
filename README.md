@@ -112,6 +112,34 @@ The server (Bun, no dependencies) keeps the event loop free: anything heavy runs
 
 The server binds to `127.0.0.1` only — it can type into your terminals, so never expose it to a network.
 
+## Mobile view
+
+`/m` is a separate view built for phones — a monitoring board, not a copy of the desktop UI.
+One row per session with its AI summary, waiting sessions first, and permission prompts you
+can answer straight from the list. Opening the desktop UI on a narrow screen offers a link to it.
+
+## Remote access (tailnet)
+
+The server binds to `127.0.0.1` and has no authentication by default, because whoever can reach
+it can type into your terminals. To reach it from a phone, put it on your tailnet and require a token:
+
+```bash
+# 1. add a token to the server (launchd users: put it in the plist)
+AGD_TOKEN=$(openssl rand -hex 24) agd web
+
+# 2. expose it to your tailnet only
+tailscale serve --bg --http=8787 http://127.0.0.1:8787
+```
+
+Then open `http://<host>.<tailnet>.ts.net:8787/m?token=<token>` once; the token is stored in a
+cookie afterwards. Requests without it get 401. Add it to your home screen for an app-like launch.
+
+| Variable | Effect |
+|---|---|
+| `AGD_TOKEN` | require this token (query `?token=`, cookie, or `Authorization: Bearer`) |
+| `AGD_BIND` | bind address (default `127.0.0.1`). Binding elsewhere without `AGD_TOKEN` refuses to start |
+| `AGD_READONLY` | reject every mutating API — view only |
+
 ## License
 
 [MIT](LICENSE)

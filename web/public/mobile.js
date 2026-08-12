@@ -12,6 +12,7 @@ let openKey = null;          // 詳細で開いているセッション
 let dTab = "screen";
 let logTimer = null;
 let lastRender = 0;
+let readOnly = false;   // サーバーが AGD_READONLY で起動している
 
 // ---------------- 一覧 ----------------
 function visible() {
@@ -40,7 +41,7 @@ function renderList() {
   el.innerHTML = list.map(s => {
     const host = s.remote ? `<span class="host">${esc(s.remote.host)}</span>` : "";
     // 入力待ちは一覧から直接答えられるようにする(詳細を開かせない)
-    const answers = s.status === "waiting" && s.prompt?.options?.length
+    const answers = !readOnly && s.status === "waiting" && s.prompt?.options?.length
       ? `<div class="answers">${s.prompt.options.slice(0, 4).map((o, i) =>
           `<button class="abtn" data-k="${esc(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}</div>`
       : "";
@@ -131,7 +132,7 @@ function paintDetail(s) {
   if (setScreen(el, s.screen ?? "(画面を取得できません)") && atBottom) el.scrollTop = el.scrollHeight;
   // 入力待ちなら応答ボタンを出す
   const p = s.prompt;
-  if (s.status === "waiting" && p?.options?.length) {
+  if (!readOnly && s.status === "waiting" && p?.options?.length) {
     $("dprompt").classList.add("on");
     $("dpq").textContent = maskText(p.question ?? "");
     $("dpa").innerHTML = p.options.map((o, i) =>
@@ -196,7 +197,7 @@ function toast(msg) {
 
 // ---------------- 起動 ----------------
 agd.onSnapshot = (sessions, changes) => {
-  $("conn").textContent = "";
+  $("conn").textContent = readOnly ? "閲覧のみ" : "";
   // 詰まりが増えた瞬間だけ知らせる(監視盤の主目的)
   for (const c of changes) if (c.to === "waiting") toast(`▲ ${c.name} が入力待ちです`);
   // 描画は最短1秒間隔。スクロール中に頻繁に差し替えない
@@ -211,4 +212,12 @@ agd.onDisconnect = () => { $("conn").textContent = "接続待ち…"; };
 agd.onMaskChange = renderList;
 
 renderFilters();
-loadConfig().then(connect);
+loadConfig().then(c => {
+  readOnly = !!c.readOnly;
+  if (readOnly) {
+    // 送信手段を出さない。押せるのに 403 になる状態が一番わかりにくい
+    $("dsend").style.display = "none";
+    $("conn").textContent = "閲覧のみ";
+  }
+  connect();
+});
