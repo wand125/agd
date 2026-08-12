@@ -12,6 +12,13 @@
     --busy: #e3b341; --waiting: #f85149; --idle: #3fb950; --resumable: #6e7681;
     --accent: #58a6ff; --user: #1f6feb;
   }
+  /* スマホでPC版を開いたときの誘導バナー(JSが幅を見て出す) */
+  #mobile-banner { display: none; flex: none; align-items: center; gap: 10px; padding: 9px 12px;
+    background: rgba(88,166,255,.14); border-bottom: 1px solid var(--accent);
+    font-size: 13px; color: var(--fg); }
+  #mobile-banner.on { display: flex; }
+  #mobile-banner a { color: var(--accent); font-weight: 600; white-space: nowrap; margin-left: auto; }
+  #mobile-banner button { background: none; border: none; color: var(--dim); font-size: 15px; padding: 0 2px; cursor: pointer; }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body { background: var(--bg); color: var(--fg); font-family: -apple-system, "Hiragino Sans", sans-serif; font-size: 14px; overflow: hidden; display: flex; flex-direction: column; }
@@ -157,6 +164,12 @@
 </style>
 </head>
 <body>
+<div id="mobile-banner">
+  <span data-i18n="banner.mobile">This dashboard is built for a desktop screen. A mobile view is available.</span>
+  <a href="/m" data-i18n="banner.open">Open mobile view</a>
+  <button id="banner-x" data-i18n-title="banner.dismiss" title="Dismiss">✕</button>
+</div>
+
 <header id="header">
   <h1>agd</h1>
   <div class="tabs">

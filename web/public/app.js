@@ -210,6 +210,21 @@ function toast(msg) {
 function sessionOf(key) { return sessions.find(x => x.key === key); }
 
 // ---------------- WebSocket ----------------
+// スマホ幅で PC 版を開いたら /m を提案する。閉じたら記憶して二度と出さない
+(function suggestMobile() {
+  const el = $("mobile-banner");
+  if (!el) return;
+  // 閉じるハンドラは表示条件に関わらず必ず張る(条件付きで登録すると閉じられなくなる)
+  $("banner-x").onclick = () => {
+    el.classList.remove("on");
+    localStorage.setItem("agd-no-mobile-banner", "1");
+  };
+  if (localStorage.getItem("agd-no-mobile-banner") === "1") return;
+  // 実機の画面幅かタッチ操作なら PC 版は窮屈なので /m を提案する
+  const narrow = Math.min(screen.width, innerWidth) <= 700;
+  if (narrow || matchMedia("(pointer: coarse)").matches) el.classList.add("on");
+})();
+
 let assetVersion = null;   // サーバーが配る app.js/i18n.js/index.html の版
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);

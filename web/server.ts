@@ -1060,7 +1060,7 @@ type Snapshot = { sessions: (Session & { screen?: string })[]; at: number };
 // 「サーバーだけ更新してUIが古いまま」という事故を防ぐ。
 function assetVersion(): string {
   let v = 0;
-  for (const f of ["app.js", "i18n.js", "index.html"]) {
+  for (const f of ["app.js", "i18n.js", "core.js", "mobile.js", "index.html", "m.html"]) {
     try { v = Math.max(v, statSync(join(import.meta.dir, "public", f)).mtimeMs); } catch {}
   }
   return String(Math.floor(v));
@@ -1312,11 +1312,17 @@ try {
     const noCache = { "Cache-Control": "no-store" };
     if (url.pathname === "/" || url.pathname === "/index.html")
       return new Response(Bun.file(INDEX_HTML), { headers: noCache });
+    // モバイルビュー(別ビュー。共通ロジックは core.js を共有する)
+    if (url.pathname === "/m" || url.pathname === "/m.html")
+      return new Response(Bun.file(join(import.meta.dir, "public", "m.html")), {
+        headers: { ...noCache, "Content-Type": "text/html;charset=utf-8" },
+      });
     // フロントの JS はいずれも no-store(更新が即反映されないと調査が難しくなる)。
     // パスは許可リストで固定し、任意のファイルを読ませない。
-    if (url.pathname === "/app.js" || url.pathname === "/i18n.js") {
-      const name = url.pathname === "/app.js" ? "app.js" : "i18n.js";
-      return new Response(Bun.file(join(import.meta.dir, "public", name)), { headers: noCache });
+    {
+      const JS = new Set(["/app.js", "/i18n.js", "/core.js", "/mobile.js"]);
+      if (JS.has(url.pathname))
+        return new Response(Bun.file(join(import.meta.dir, "public", url.pathname.slice(1))), { headers: noCache });
     }
     if (url.pathname === "/favicon.ico")
       return new Response(Bun.file(join(import.meta.dir, "public", "favicon.ico")));
