@@ -201,15 +201,18 @@ $("dpa").onclick = (e) => {
     tracking = false;
     const t = e.changedTouches[0];
     const dx = t.clientX - x0, dy = t.clientY - y0;
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;   // 縦寄りは無視
+    // 45px 以上かつ横移動が縦の1.5倍以上。実機では端まで指を滑らせた後に
+    // 短くフリックすることが多く、60px/2倍は厳しすぎて反応しなかった。
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     if (fromEdge && dx > 0) { closeDetail(); return; }                  // 左端→右で戻る
     if (scroller) {
-      // 実際にスクロールしたなら、それはスクロール操作。切替はしない
-      if (scroller.scrollLeft !== sx0) return;
+      // 判定は「触り始めた時点で端にいたか」で行う。touchend の scrollLeft は
+      // 慣性スクロールでまだ動いている最中のことがあり、端にいても
+      // 「スクロールした」と誤判定されるため使わない。
       const max = scroller.scrollWidth - scroller.clientWidth;
-      // まだその向きに余地があるなら、やはりスクロール意図とみなす
-      if (dx < 0 && scroller.scrollLeft < max - 1) return;   // 左へ = 右端ではない
-      if (dx > 0 && scroller.scrollLeft > 1) return;         // 右へ = 左端ではない
+      const EPS = 2;
+      if (dx < 0 && sx0 < max - EPS) return;   // 左フリック: 開始時に右端でなければスクロール意図
+      if (dx > 0 && sx0 > EPS) return;         // 右フリック: 開始時に左端でなければスクロール意図
     }
     const i = TABS.indexOf(dTab);
     const next = TABS[Math.min(TABS.length - 1, Math.max(0, i + (dx < 0 ? 1 : -1)))];
