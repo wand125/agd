@@ -41,7 +41,12 @@
   header .spacer { flex: 1; }
   header label { color: var(--dim); font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
   .tabs { display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
-  .tab { padding: 4px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--dim); user-select: none; white-space: nowrap; }
+  .tab { padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--dim);
+         user-select: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+  .tab svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2;
+             stroke-linecap: round; stroke-linejoin: round; display: block; }
+  /* 画面一覧アイコンのパネルは塗りで示すと 4 枚あることが分かりやすい */
+  #tab-grid svg rect { fill: currentColor; stroke: none; }
   .tab.on { background: #21262d; color: var(--fg); }
   .tab .badge { font-size: 11px; color: var(--waiting); }
   #search { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); padding: 5px 10px; font-size: 13px; width: 200px; outline: none; }
@@ -193,8 +198,18 @@
 <header id="header">
   <h1>agd</h1>
   <div class="tabs">
-    <span class="tab on" id="tab-grid"><span data-i18n="tab.grid">Screens</span> <span class="badge" id="tab-grid-badge"></span></span>
-    <span class="tab" id="tab-list" data-i18n="tab.list">Sessions</span>
+    <span class="tab" id="tab-list" data-i18n-title="tab.list" title="Sessions">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </span>
+    <span class="tab on" id="tab-grid" data-i18n-title="tab.grid" title="Screens">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/>
+        <rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>
+      </svg>
+      <span class="badge" id="tab-grid-badge"></span>
+    </span>
   </div>
   <span class="stats" id="stats">Connecting…</span>
   <input id="search" data-i18n-ph="search.placeholder" placeholder="Filter / Enter for full-text search">
