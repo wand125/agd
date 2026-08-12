@@ -14,6 +14,16 @@ let logTimer = null;
 let lastRender = 0;
 let readOnly = false;   // サーバーが AGD_READONLY で起動している
 
+// 書きかけの入力(セッションkey → 本文)。戻ってきたら復元する
+const DRAFT_KEY = "agd-m-drafts";
+let drafts = {};
+try { drafts = JSON.parse(localStorage.getItem(DRAFT_KEY) || "{}"); } catch {}
+function saveDraft(key, text) {
+  if (!key) return;
+  if (text) drafts[key] = text; else delete drafts[key];
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts)); } catch {}
+}
+
 // ---------------- 一覧 ----------------
 function visible() {
   const q = query.trim().toLowerCase();
@@ -108,6 +118,7 @@ async function openDetail(key) {
   $("dtitle").innerHTML = esc(maskText(s.name))
     + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
   $("dmeta").textContent = `${shortCwd(s.cwd)} · ${s.status}`;
+  $("dinput").value = drafts[key] ?? "";      // 書きかけを復元
   $("ddot").className = `dot ${s.status}`;
   setTab("screen", true);
   paintDetail(s, true);
@@ -122,6 +133,7 @@ async function openDetail(key) {
   }, 4000);
 }
 function closeDetail() {
+  saveDraft(openKey, $("dinput").value.trim());   // 書きかけを残して戻る
   $("detail").classList.remove("on");
   openKey = null;
   clearInterval(logTimer);
@@ -157,18 +169,33 @@ $("dpa").onclick = (e) => {
 // 詳細内のスワイプ操作。
 //   左右フリック          → 画面 ⇄ ログ のタブ切替
 //   画面左端からの右フリック → 一覧へ戻る(iOS の「戻る」に合わせる)
-// 縦スクロールと端末画面の横スクロールを邪魔しないよう、横移動が縦より
-// 十分大きいときだけ反応させる。
+//
+// 端末画面(#dscreen)は原寸維持のため自前で横スクロールする。その上で
+// 始まったスワイプは「画面をスクロールしたい」意図なので、タブ切替には
+// 使わない。ただし端に張り付いていて、それ以上その向きへスクロールできない
+// 場合だけは切替を許す(iOS のページ送りと同じ感覚)。
 (function detailSwipe() {
   const el = $("detail");
   const TABS = ["screen", "log"];
-  let x0 = 0, y0 = 0, fromEdge = false, tracking = false;
+  let x0 = 0, y0 = 0, fromEdge = false, tracking = false, scroller = null, sx0 = 0;
+
+  const hScroller = (node) => {
+    for (let n = node; n && n !== el; n = n.parentElement) {
+      if (n.scrollWidth > n.clientWidth + 2) return n;   // 横スクロールできる祖先
+    }
+    return null;
+  };
+
   el.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) { tracking = false; return; }
-    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-    fromEdge = x0 <= 24;               // 画面左端から始まったか
+    const t = e.touches[0];
+    x0 = t.clientX; y0 = t.clientY;
+    fromEdge = x0 <= 24;
+    scroller = hScroller(t.target);
+    sx0 = scroller ? scroller.scrollLeft : 0;
     tracking = true;
   }, { passive: true });
+
   el.addEventListener("touchend", (e) => {
     if (!tracking) return;
     tracking = false;
@@ -176,8 +203,15 @@ $("dpa").onclick = (e) => {
     const dx = t.clientX - x0, dy = t.clientY - y0;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;   // 縦寄りは無視
     if (fromEdge && dx > 0) { closeDetail(); return; }                  // 左端→右で戻る
+    if (scroller) {
+      // 実際にスクロールしたなら、それはスクロール操作。切替はしない
+      if (scroller.scrollLeft !== sx0) return;
+      const max = scroller.scrollWidth - scroller.clientWidth;
+      // まだその向きに余地があるなら、やはりスクロール意図とみなす
+      if (dx < 0 && scroller.scrollLeft < max - 1) return;   // 左へ = 右端ではない
+      if (dx > 0 && scroller.scrollLeft > 1) return;         // 右へ = 左端ではない
+    }
     const i = TABS.indexOf(dTab);
-    // 左フリックで次のタブ、右フリックで前のタブ
     const next = TABS[Math.min(TABS.length - 1, Math.max(0, i + (dx < 0 ? 1 : -1)))];
     if (next !== dTab) setTab(next, true);
   }, { passive: true });
@@ -220,9 +254,13 @@ async function send() {
   if (!canOperate(s)) { toast("実行中のセッションではありません"); return; }
   $("dinput").value = "";
   const r = await sendText(s, text);
-  toast((r.result || "").startsWith("ok") ? "送信しました" : "送信に失敗しました");
+  const ok = (r.result || "").startsWith("ok");
+  if (ok) saveDraft(s.key, "");
+  else { $("dinput").value = text; saveDraft(s.key, text); }   // 失敗時は打ち直させない
+  toast(ok ? "送信しました" : "送信に失敗しました");
 }
 $("dsendbtn").onclick = send;
+$("dinput").oninput = () => saveDraft(openKey, $("dinput").value.trim());
 $("dinput").onkeydown = (e) => {
   if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
 };
