@@ -58,8 +58,10 @@ function renderCounts() {
     `<span class="c-idle">○<b>${c.idle}</b></span>`;
 }
 
+let swiping = false;      // 行スワイプ中は再描画を止める
 function renderList() {
   renderCounts();
+  if (swiping) return;    // 描き直すと対象行が別要素になり操作が壊れる
   const list = visible();
   const el = $("list");
   if (!list.length) { el.innerHTML = `<div class="empty">該当するセッションがありません</div>`; return; }
@@ -138,7 +140,7 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     if (!row) return;
     if (animate) row.style.transition = "transform .18s";
     row.style.transform = "";
-    const r = row, done = () => { r.style.transition = ""; r.classList.remove("swiping"); };
+    const r = row, done = () => { r.style.transition = ""; r.classList.remove("swiping", "armed"); };
     animate ? setTimeout(done, 180) : done();
     row = key = dir = null;
   };
@@ -150,6 +152,7 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     row = t.target.closest?.(".row") ?? null;
     key = row?.dataset.k ?? null;
     x0 = t.clientX; y0 = t.clientY; dir = null;
+    swiping = !!row;
   }, { passive: true });
 
   list.addEventListener("touchmove", (e) => {
@@ -174,7 +177,9 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     const k = key;
     row.classList.remove("armed");
     reset(true);
-    if (fired && k) togglePin(k);
+    swiping = false;
+    if (fired && k) togglePin(k);      // ここで renderList が走り一覧が最新になる
+    else renderList();                 // 止めていた間の更新を反映
   }, { passive: true });
 })();
 

@@ -79,8 +79,10 @@
     z-index: -1; white-space: pre-line; text-align: center; line-height: 1.25;
   }
   .row.swiping::before { display: flex; }
-  /* 疑似要素は position:absolute なので、スワイプ中だけ基準を作れば足りる */
+  /* 確定圏に入ったら色を濃くして知らせる。ピン留めは緑、解除は赤で
+     「何が起きるか」を色でも区別する */
   .row.swiping.armed::before { background: var(--idle); }
+  .row.pinned.swiping.armed::before { background: var(--waiting); color: #fff; }
   .row:active { background: var(--panel); }
   .row.waiting { background: rgba(248,81,73,.08); }
   /* ピン留めした行は左に印を付けて、常に上位に来ることを分かるようにする */
