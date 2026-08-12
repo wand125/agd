@@ -1234,66 +1234,107 @@ async function pollRemotes() {
   } finally { remotePolling = false; }
 }
 
+// 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)のキー衝突対策。
+// 重要: 一度プロセス(pid)に割り当てたキーは、そのプロセスが生きている限り変えない。
+// (元プロセス終了時に新プロセスのキーが SID#PID → SID に変わると、カードの同一性が
+//  飛んで位置・選択・表示が入れ替わったように見えるため)
+function assignStableKeys(running: Session[]) {
+  const live = new Set(running.map(s => `${s.agent}:${s.sid}:${s.pid}`));
+  for (const k of keyAssign.keys()) if (!live.has(k)) keyAssign.delete(k);
+  const groups = new Map<string, Session[]>();
+  for (const s of running) {
+    const g = groups.get(s.key);
+    if (g) g.push(s); else groups.set(s.key, [s]);
+  }
+  for (const g of groups.values()) {
+    const used = new Set<string>();
+    // 既に割当済みのプロセスはそのキーを維持
+    for (const s of g) {
+      const id = `${s.agent}:${s.sid}:${s.pid}`;
+      const prior = keyAssign.get(id);
+      if (prior) { s.key = prior; used.add(prior); }
+    }
+    // 未割当は「最古がベースキー(空いていれば)、それ以外は #pid」
+    const unassigned = g.filter(s => !keyAssign.has(`${s.agent}:${s.sid}:${s.pid}`))
+      .sort((a, b) => (b.ageS - a.ageS) || ((a.pid ?? 0) - (b.pid ?? 0)));
+    for (const s of unassigned) {
+      const base = s.key;
+      const assigned = used.has(base) ? `${base}#${s.pid ?? 0}` : base;
+      s.key = assigned;
+      used.add(assigned);
+      keyAssign.set(`${s.agent}:${s.sid}:${s.pid}`, assigned);
+    }
+  }
+}
+
+// 長時間ログ更新の無い claude の busy はゾンビ表示とみなして idle に補正(#4)。
+// 長いツール実行中(書き込みなし)の誤判定を避けるため閾値は10分と長めに取る
+function fixZombieBusy(running: Session[]) {
+  for (const s of running) {
+    if (s.agent !== "claude" || s.status !== "busy") continue;
+    const p = findClaudeTranscript(s.sid);
+    if (!p) continue;
+    try { if (Date.now() - statSync(p).mtimeMs > 10 * 60_000) s.status = "idle"; } catch {}
+  }
+}
+
+// 画面から選択プロンプトを検出。codex はこれで waiting 判定も行う
+function applyPrompts(running: Session[], screens: Map<string, string>) {
+  for (const s of running) {
+    const p = detectPrompt(screens.get(s.tty));
+    if (!p) continue;
+    s.prompt = p;
+    // 誤検出防止: waiting への昇格は「番号付き選択肢」または「codexのカーソル選択」のみ
+    const confident = p.kind === "numbered" || (s.agent === "codex" && p.kind === "cursor");
+    if (confident && s.status === "idle") s.status = "waiting";
+  }
+}
+
+type StatusChange = { key: string; name: string; agent: string; from: string; to: string; tty: string };
+
+// 前回スナップショットとの状態差分。通知と要約の起点になる
+function detectChanges(running: Session[]): StatusChange[] {
+  const changes: StatusChange[] = [];
+  for (const s of running) {
+    const prev = prevStatus.get(s.key);
+    if (prev && prev !== s.status) changes.push({ key: s.key, name: s.name, agent: s.agent, from: prev, to: s.status, tty: s.tty });
+    prevStatus.set(s.key, s.status);
+  }
+  return changes;
+}
+
+// 要約トリガー: busy → idle/waiting の遷移時 + 要約未作成の実行中セッション
+function fireSummaries(changes: StatusChange[], running: Session[]) {
+  if (config.summarize === false) return;
+  for (const c of changes)
+    if (c.from === "busy" && (c.to === "waiting" || c.to === "idle")) requestSummary(c.key);
+  for (const s of running)
+    if (!summariesMap.has(baseKey(s.key))) requestSummary(s.key, false, true);
+}
+
+// macOS 通知(busy→waiting/idle)
+function fireMacNotify(changes: StatusChange[]) {
+  if (!config.macNotify) return;
+  for (const c of changes) {
+    if (c.from !== "busy" || (c.to !== "waiting" && c.to !== "idle")) continue;
+    const label = c.to === "waiting" ? "入力待ち" : "完了";
+    macNotify(`${c.name} — ${label}`, `${c.agent} / クリックでターミナルへ`, c.tty).catch(() => {});
+  }
+}
+
 async function poll() {
   try {
     await updateRolloutCache();
     loadCodexNames();
     const [cr, xr] = await Promise.all([claudeRunning(), codexRunning()]);
     const running = [...cr, ...xr, ...remoteCacheList()];
-    // 同一セッションIDを複数プロセスで開いている場合(resume引き継ぎ直後など)のキー衝突対策。
-    // 重要: 一度プロセス(pid)に割り当てたキーは、そのプロセスが生きている限り変えない。
-    // (元プロセス終了時に新プロセスのキーが SID#PID → SID に変わると、カードの同一性が
-    //  飛んで位置・選択・表示が入れ替わったように見えるため)
-    {
-      const live = new Set(running.map(s => `${s.agent}:${s.sid}:${s.pid}`));
-      for (const k of keyAssign.keys()) if (!live.has(k)) keyAssign.delete(k);
-      const groups = new Map<string, Session[]>();
-      for (const s of running) {
-        const g = groups.get(s.key);
-        if (g) g.push(s); else groups.set(s.key, [s]);
-      }
-      for (const g of groups.values()) {
-        const used = new Set<string>();
-        // 既に割当済みのプロセスはそのキーを維持
-        for (const s of g) {
-          const id = `${s.agent}:${s.sid}:${s.pid}`;
-          const prior = keyAssign.get(id);
-          if (prior) { s.key = prior; used.add(prior); }
-        }
-        // 未割当は「最古がベースキー(空いていれば)、それ以外は #pid」
-        const unassigned = g.filter(s => !keyAssign.has(`${s.agent}:${s.sid}:${s.pid}`))
-          .sort((a, b) => (b.ageS - a.ageS) || ((a.pid ?? 0) - (b.pid ?? 0)));
-        for (const s of unassigned) {
-          const base = s.key;
-          const assigned = used.has(base) ? `${base}#${s.pid ?? 0}` : base;
-          s.key = assigned;
-          used.add(assigned);
-          keyAssign.set(`${s.agent}:${s.sid}:${s.pid}`, assigned);
-        }
-      }
-    }
+    assignStableKeys(running);
     const runningSids = new Set(running.map(s => s.sid));
     const recents = [...claudeRecent(runningSids), ...codexRecent(runningSids)]
       .filter(s => !runningSids.has(s.sid));
-    // 長時間ログ更新の無い claude の busy はゾンビ表示とみなして idle に補正(#4)。
-    // 長いツール実行中(書き込みなし)の誤判定を避けるため閾値は10分と長めに取る
-    for (const s of running) {
-      if (s.agent !== "claude" || s.status !== "busy") continue;
-      const p = findClaudeTranscript(s.sid);
-      if (!p) continue;
-      try { if (Date.now() - statSync(p).mtimeMs > 10 * 60_000) s.status = "idle"; } catch {}
-    }
+    fixZombieBusy(running);
     const screens = await captureScreens(running.map(s => s.tty));
-    // 画面から選択プロンプトを検出。codex はこれで waiting 判定も行う
-    for (const s of running) {
-      const p = detectPrompt(screens.get(s.tty));
-      if (p) {
-        s.prompt = p;
-        // 誤検出防止: waiting への昇格は「番号付き選択肢」または「codexのカーソル選択」のみ
-        const confident = p.kind === "numbered" || (s.agent === "codex" && p.kind === "cursor");
-        if (confident && s.status === "idle") s.status = "waiting";
-      }
-    }
+    applyPrompts(running, screens);
     // git 情報(キャッシュ付き)
     await Promise.all(running.map(async s => {
       const g = await gitInfo(s.cwd);
@@ -1305,29 +1346,9 @@ async function poll() {
       // リモートは tty を持たず pollRemotes が s.screen を埋めているので温存する
       .map(s => ({ ...s, screen: (s as RemoteSession).screen ?? screens.get(s.tty), summary: summariesMap.get(baseKey(s.key)) }));
     lastSnapshot = { sessions, at: Date.now() };
-    // 状態変化検知 → 通知イベント
-    const changes: { key: string; name: string; agent: string; from: string; to: string; tty: string }[] = [];
-    for (const s of running) {
-      const prev = prevStatus.get(s.key);
-      if (prev && prev !== s.status) changes.push({ key: s.key, name: s.name, agent: s.agent, from: prev, to: s.status, tty: s.tty });
-      prevStatus.set(s.key, s.status);
-    }
-    // 要約トリガー: busy → idle/waiting の遷移時 + 要約未作成の実行中セッション
-    if (config.summarize !== false) {
-      for (const c of changes)
-        if (c.from === "busy" && (c.to === "waiting" || c.to === "idle")) requestSummary(c.key);
-      for (const s of running)
-        if (!summariesMap.has(baseKey(s.key))) requestSummary(s.key, false, true);
-    }
-    // macOS 通知(busy→waiting/idle)
-    if (config.macNotify) {
-      for (const c of changes) {
-        if (c.from === "busy" && (c.to === "waiting" || c.to === "idle")) {
-          const label = c.to === "waiting" ? "入力待ち" : "完了";
-          macNotify(`${c.name} — ${label}`, `${c.agent} / クリックでターミナルへ`, c.tty).catch(() => {});
-        }
-      }
-    }
+    const changes = detectChanges(running);
+    fireSummaries(changes, running);
+    fireMacNotify(changes);
     const msg = JSON.stringify({ type: "snapshot", ...lastSnapshot, changes, assetVersion: assetVersion() });
     for (const ws of wsClients) { try { ws.send(msg); } catch {} }
   } catch (e) {
