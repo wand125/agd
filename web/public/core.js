@@ -131,11 +131,15 @@ function ansiToHtml(raw) {
   if (openSpan) out += "</span>";
   return out;
 }
-// 差分が無ければ描き直さない(スクロール位置と選択を保つ)
+// 差分が無ければ描き直さない(スクロール位置と選択を保つ)。
+// 描き直す場合も横位置は復元する。innerHTML の入れ替えで scrollLeft が 0 に
+// 戻るため、横に送って読んでいる最中に再描画が走ると先頭へ飛んでしまう。
 function setScreen(el, raw) {
   if (el.dataset.raw === raw) return false;
+  const sx = el.scrollLeft;
   el.dataset.raw = raw;
   el.innerHTML = ansiToHtml(raw);
+  if (sx) el.scrollLeft = sx;
   return true;
 }
 

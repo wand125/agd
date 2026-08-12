@@ -66,9 +66,26 @@
   #list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
           padding-bottom: calc(var(--safe-bottom) + 12px); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
-         border-bottom: 1px solid var(--border); }
+         border-bottom: 1px solid var(--border); background: var(--bg); }
+  /* スワイプ中の行だけを合成レイヤーに上げる。全行に will-change を付けると
+     各行が独立レイヤーになり、通常スクロール時に浮いて見える */
+  .row.swiping { position: relative; z-index: 1; will-change: transform; }
+  /* スワイプ中に行の下(左側)から現れるアクション表示。
+     行自体が translateX で右へ動くことで見えるようになる。 */
+  .row::before {
+    content: attr(data-action); position: absolute; left: -64px; top: 0; bottom: 0; width: 64px;
+    display: none; align-items: center; justify-content: center; gap: 4px;
+    font-size: 11px; font-weight: 600; color: #0d1117; background: var(--busy);
+    z-index: -1; white-space: pre-line; text-align: center; line-height: 1.25;
+  }
+  .row.swiping::before { display: flex; }
+  /* 疑似要素は position:absolute なので、スワイプ中だけ基準を作れば足りる */
+  .row.swiping.armed::before { background: var(--idle); }
   .row:active { background: var(--panel); }
   .row.waiting { background: rgba(248,81,73,.08); }
+  /* ピン留めした行は左に印を付けて、常に上位に来ることを分かるようにする */
+  .row.pinned { box-shadow: inset 3px 0 0 var(--busy); }
+  .pin-mark { font-size: 10px; flex: none; opacity: .9; }
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 5px; }
   .dot.waiting { background: var(--waiting); animation: blink 1s infinite; }
   .dot.busy { background: var(--busy); animation: pulse 1.6s infinite; }

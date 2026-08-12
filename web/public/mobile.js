@@ -14,6 +14,18 @@ let logTimer = null;
 let lastRender = 0;
 let readOnly = false;   // サーバーが AGD_READONLY で起動している
 
+// ピン留め。PC版と同じキーを使うので、どちらで留めても両方に反映される
+let pinned = [];
+try { pinned = JSON.parse(localStorage.getItem("agd-pinned-keys") || "[]"); } catch {}
+function togglePin(key) {
+  const i = pinned.indexOf(key);
+  const s = sessionOf(key);
+  if (i >= 0) { pinned.splice(i, 1); toast(`ピン解除: ${maskText(s?.name ?? key)}`); }
+  else { pinned.push(key); toast(`📌 ${maskText(s?.name ?? key)}`); }
+  try { localStorage.setItem("agd-pinned-keys", JSON.stringify(pinned)); } catch {}
+  renderList();
+}
+
 // 書きかけの入力(セッションkey → 本文)。戻ってきたら復元する
 const DRAFT_KEY = "agd-m-drafts";
 let drafts = {};
@@ -30,8 +42,11 @@ function visible() {
   return agd.sessions
     .filter(s => filter.has(s.status))
     .filter(s => !q || `${s.name} ${s.cwd} ${s.summary ?? ""}`.toLowerCase().includes(q))
-    // 詰まっているものを上に。同状態なら新しい順
-    .sort((a, b) => STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.ageS - b.ageS);
+    // ピン > 詰まっているもの > 新しい順
+    .sort((a, b) =>
+      (pinned.includes(b.key) ? 1 : 0) - (pinned.includes(a.key) ? 1 : 0)
+      || STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status)
+      || a.ageS - b.ageS);
 }
 
 function renderCounts() {
@@ -55,13 +70,15 @@ function renderList() {
       ? `<div class="answers">${s.prompt.options.slice(0, 4).map((o, i) =>
           `<button class="abtn" data-k="${esc(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}</div>`
       : "";
-    return `<div class="row ${s.status}" data-k="${esc(s.key)}">
+    const isPinned = pinned.includes(s.key);
+    return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${esc(s.key)}"
+      data-action="${isPinned ? "📌\n解除" : "📌\nピン"}">
       <span class="dot ${s.status}"></span>
       <div class="body">
         <div class="line1">
           <span class="proj" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
           <span class="name">${esc(maskText(s.name))}</span>
-          ${host}<span class="age">${fmtAge(s.ageS)}</span>
+          ${host}${pinned.includes(s.key) ? '<span class="pin-mark">📌</span>' : ""}<span class="age">${fmtAge(s.ageS)}</span>
         </div>
         ${s.title ? `<div class="ai-title">${esc(maskText(s.title))}</div>` : ""}
         ${s.summary ? `<div class="sum">${esc(maskText(s.summary))}</div>` : ""}
@@ -108,6 +125,58 @@ $("btn-q").onclick = () => {
   if (on) $("q").focus(); else { $("q").value = ""; query = ""; renderList(); }
 };
 $("q").oninput = (e) => { query = e.target.value; renderList(); };
+
+// 一覧の行を右へスワイプしてピン留め切替。指の動きに行が追従し、左側に
+// これから起きるアクション(📌 ピン留め / ピン解除)が現れる。
+// 縦スクロールを妨げないよう、横向きと判断できるまでは行を動かさない。
+(function listSwipe() {
+  const list = $("list");
+  const THRESHOLD = 64;          // これ以上で確定
+  let row = null, key = null, x0 = 0, y0 = 0, dir = null;   // dir: null=未判定 "h"=横 "v"=縦
+
+  const reset = (animate) => {
+    if (!row) return;
+    if (animate) row.style.transition = "transform .18s";
+    row.style.transform = "";
+    const r = row, done = () => { r.style.transition = ""; r.classList.remove("swiping"); };
+    animate ? setTimeout(done, 180) : done();
+    row = key = dir = null;
+  };
+
+  list.addEventListener("touchstart", (e) => {
+    reset(false);
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    row = t.target.closest?.(".row") ?? null;
+    key = row?.dataset.k ?? null;
+    x0 = t.clientX; y0 = t.clientY; dir = null;
+  }, { passive: true });
+
+  list.addEventListener("touchmove", (e) => {
+    if (!row || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (!dir) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      dir = Math.abs(dx) > Math.abs(dy) * 1.2 ? "h" : "v";
+      if (dir === "h") row.classList.add("swiping");     // 左のアクション欄を見せる
+    }
+    if (dir !== "h") return;
+    // 右方向のみ。行き過ぎは抵抗をつけて止める
+    const shift = dx <= 0 ? 0 : dx < THRESHOLD ? dx : THRESHOLD + (dx - THRESHOLD) * 0.3;
+    row.style.transform = `translateX(${shift}px)`;
+    row.classList.toggle("armed", dx >= THRESHOLD);
+  }, { passive: true });
+
+  list.addEventListener("touchend", (e) => {
+    if (!row) return;
+    const fired = dir === "h" && row.classList.contains("armed");
+    const k = key;
+    row.classList.remove("armed");
+    reset(true);
+    if (fired && k) togglePin(k);
+  }, { passive: true });
+})();
 
 // ---------------- 詳細 ----------------
 async function openDetail(key) {
