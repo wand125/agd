@@ -191,10 +191,19 @@ function answerPrompt(s, n) {
 
 // ---------------- WebSocket ----------------
 // 再接続と資産バージョン監視は共通。受け取った内容の見せ方だけがビューの仕事。
+let reconnectTimer = null;
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  // 多重接続を避ける。onclose と onerror の両方から呼ばれても1本に収束させる
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  let ws;
+  try { ws = new WebSocket(`ws://${location.host}/ws`); }
+  catch { return retry(); }
+
   ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
+    let msg;
+    // 壊れたフレームで更新が止まらないよう、パース失敗はその1件だけ捨てる
+    try { msg = JSON.parse(ev.data); } catch { return; }
     if (msg.type !== "snapshot") return;
     // フロント資産が更新されたら自動で読み直す。agd.app(WKWebView)は
     // 手動リロード手段が限られ、古い JS のまま動き続けると原因が掴みにくい
@@ -203,9 +212,17 @@ function connect() {
       else if (agd.assetVersion !== msg.assetVersion) { location.reload(); return; }
     }
     agd.sessions = msg.sessions || [];
-    agd.onSnapshot?.(agd.sessions, msg.changes || []);
+    // 描画side の例外で受信ループを壊さない
+    try { agd.onSnapshot?.(agd.sessions, msg.changes || []); }
+    catch (e) { console.error("onSnapshot:", e); }
   };
-  ws.onclose = () => { agd.onDisconnect?.(); setTimeout(connect, 2000); };
+  // onerror だけが飛んで onclose が来ない環境もあるため両方から再接続する
+  ws.onerror = () => { try { ws.close(); } catch {} };
+  ws.onclose = () => { agd.onDisconnect?.(); retry(); };
+}
+function retry() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(connect, 2000);
 }
 
 // 起動時の設定取得(パス短縮の接頭辞など)

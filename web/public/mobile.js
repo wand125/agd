@@ -59,9 +59,16 @@ function renderCounts() {
 }
 
 let swiping = false;      // 行スワイプ中は再描画を止める
+let swipeAt = 0;          // スワイプを開始した時刻(固着の検知に使う)
 function renderList() {
   renderCounts();
-  if (swiping) return;    // 描き直すと対象行が別要素になり操作が壊れる
+  // スワイプ中は描き直さない(対象行が別要素になり操作が壊れるため)。
+  // ただし触っていないのにフラグが残った場合に備え、時間で強制解除する
+  if (swiping) {
+    if (Date.now() - swipeAt < 5000) return;
+    swiping = false;
+    document.querySelectorAll("#list .row.swiping").forEach(r => r.classList.remove("swiping", "armed"));
+  }
   // 前回のスワイプで付いたインラインスタイルが残っていると、次の描画で
   // それが引き継がれて他の行まで動いて見えることがある
   document.querySelectorAll("#list .row[style]").forEach(r => r.removeAttribute("style"));
@@ -105,9 +112,27 @@ $("list").onclick = (e) => {
   if (row) openDetail(row.dataset.k);
 };
 
+let answering = false;   // 応答の多重送信を防ぐ
 async function answer(s, n) {
-  const r = await answerPrompt(s, Number(n));
-  toast(t(r ? "m.sent" : "m.answerFailed"));
+  if (answering) return;
+  answering = true;
+  try {
+    const r = await answerPrompt(s, Number(n));
+    if (!r) { toast(t("m.answerFailed")); return; }
+    toast(t("m.sent"));
+    // 送信済みのプロンプトは即座に畳む。次のポーリングまで残っていると
+    // 同じ選択肢をもう一度押せてしまう
+    delete s.prompt;
+    const cur = sessionOf(s.key);
+    if (cur) delete cur.prompt;
+    renderList();
+    if (openKey === s.key) paintDetail(cur ?? s);
+  } catch (e) {
+    // 通信断などで送信できなかった場合。黙って固まらせない
+    toast(t("m.answerFailed"));
+  } finally {
+    answering = false;
+  }
 }
 
 // ---------------- フィルタ ----------------
@@ -156,6 +181,7 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     key = row?.dataset.k ?? null;
     x0 = t.clientX; y0 = t.clientY; dir = null;
     swiping = !!row;
+    swipeAt = Date.now();
   }, { passive: true });
 
   list.addEventListener("touchmove", (e) => {
@@ -174,16 +200,20 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     row.classList.toggle("armed", dx >= THRESHOLD);
   }, { passive: true });
 
-  list.addEventListener("touchend", (e) => {
-    if (!row) return;
-    const fired = dir === "h" && row.classList.contains("armed");
+  const finish = (fire) => {
+    if (!row) { swiping = false; return; }
+    const fired = fire && dir === "h" && row.classList.contains("armed");
     const k = key;
     row.classList.remove("armed");
     reset(true);
     swiping = false;
     if (fired && k) togglePin(k);      // ここで renderList が走り一覧が最新になる
     else renderList();                 // 止めていた間の更新を反映
-  }, { passive: true });
+  };
+  list.addEventListener("touchend", () => finish(true), { passive: true });
+  // 着信やシステムジェスチャで touchend が来ないことがある。ここで解除しないと
+  // swiping が立ったままになり、一覧が更新されず古い表示のまま固まる
+  list.addEventListener("touchcancel", () => finish(false), { passive: true });
 })();
 
 // ---------------- 詳細 ----------------
@@ -376,6 +406,9 @@ agd.onDisconnect = () => { $("conn").textContent = t("m.connecting"); };
 // 前面に戻ったら止めていた分を取り戻す
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
+  // 背面に回っている間に指を離した場合、touchend が来ないことがある
+  swiping = false;
+  document.querySelectorAll("#list .row[style]").forEach(r => r.removeAttribute("style"));
   renderList();
   const s = sessionOf(openKey);
   if (s) { paintDetail(s); if (dTab === "log") loadLog(s); }
