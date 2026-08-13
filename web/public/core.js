@@ -151,6 +151,67 @@ function setScreen(el, raw) {
   return true;
 }
 
+
+// ---------------- Markdown(会話ログ用の最小実装) ----------------
+// claude/codex の応答は Markdown で返ることが多い。外部ライブラリを足さずに
+// よく出る記法だけを扱う。入力は必ず esc() 済みの文字列を渡すこと
+// (この関数は自分でエスケープしない = 二重エスケープを避けるため)。
+function mdInline(escaped) {
+  return linkify(escaped)
+    // `code` は最初に処理する。中の記号を装飾として解釈させない
+    .replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,、。]|$)/g, "$1<em>$2</em>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+}
+
+// 行単位で見出し・箇条書き・コードブロックを組み立てる。
+// 未対応の記法はそのまま文字として残す(壊すより読めるほうがよい)。
+function renderMarkdown(text) {
+  const lines = esc(text ?? "").split("\n");
+  const out = [];
+  let list = null;        // "ul" | "ol" | null
+  let fence = null;       // コードブロック中の言語名(``` の内側)
+  let buf = [];           // コードブロックの中身
+
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const openList = (kind) => {
+    if (list === kind) return;
+    closeList();
+    out.push(`<${kind}>`);
+    list = kind;
+  };
+
+  for (const line of lines) {
+    const fenceM = line.match(/^\s*```(\w*)\s*$/);
+    if (fenceM) {
+      if (fence === null) { closeList(); fence = fenceM[1] || ""; buf = []; }
+      else { out.push(`<pre class="md-code"><code>${buf.join("\n")}</code></pre>`); fence = null; }
+      continue;
+    }
+    if (fence !== null) { buf.push(line); continue; }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { closeList(); out.push(`<div class="md-h md-h${h[1].length}">${mdInline(h[2])}</div>`); continue; }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { closeList(); out.push('<hr class="md-hr">'); continue; }
+
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (ul) { openList("ul"); out.push(`<li>${mdInline(ul[1])}</li>`); continue; }
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ol) { openList("ol"); out.push(`<li>${mdInline(ol[1])}</li>`); continue; }
+
+    const quote = line.match(/^\s*&gt;\s?(.*)$/);   // esc 済みなので > は &gt;
+    if (quote) { closeList(); out.push(`<div class="md-quote">${mdInline(quote[1])}</div>`); continue; }
+
+    closeList();
+    out.push(line.trim() === "" ? "" : mdInline(line));
+  }
+  if (fence !== null) out.push(`<pre class="md-code"><code>${buf.join("\n")}</code></pre>`);
+  closeList();
+  // 元の改行は CSS の white-space に任せる(<br> を挟むと箇条書きが崩れる)
+  return out.join("\n");
+}
+
 // ---------------- ツール入力の整形 ----------------
 // Edit/Write は diff として、Bash はコマンドとして見せる。両ビューで共用する。
 function renderToolUse(e) {

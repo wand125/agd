@@ -177,6 +177,25 @@
   .diff-del { background: rgba(248,81,73,.15); color: #ffa198; }
   .diff-file { color: var(--accent); font-size: 11px; }
   .entry a { color: var(--accent); word-break: break-all; }
+  /* ---- ログ本文の Markdown(端末画面には適用しない) ---- */
+  .entry .md-h { font-weight: 700; margin: 6px 0 2px; }
+  .entry .md-h1 { font-size: 1.15em; }
+  .entry .md-h2 { font-size: 1.08em; }
+  .entry .md-h3, .entry .md-h4 { font-size: 1em; color: var(--accent); }
+  .entry ul, .entry ol { margin: 2px 0 2px 1.2em; padding: 0; }
+  .entry li { margin: 1px 0; }
+  .entry code { background: rgba(110,118,129,.25); border-radius: 4px; padding: 0 4px;
+                font-family: "SF Mono", Menlo, monospace; font-size: .92em; }
+  .entry pre.md-code { background: #010409; border: 1px solid var(--border); border-radius: 6px;
+                       padding: 8px 10px; margin: 5px 0; overflow-x: auto;
+                       font-family: "SF Mono", Menlo, monospace; font-size: .9em;
+                       white-space: pre; }
+  .entry pre.md-code code { background: none; padding: 0; }
+  .entry .md-quote { border-left: 3px solid var(--border); padding-left: 8px; color: var(--dim); margin: 2px 0; }
+  .entry .md-hr { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
+  .entry strong { font-weight: 700; }
+  .entry em { font-style: italic; }
+  .entry del { opacity: .6; }
   .ts { font-size: 10px; color: var(--dim); }
   /* 送信欄は最小限。長文入力は想定せず「Yes」「続けて」程度を送る */
   #dsend { flex: none; display: flex; gap: 8px; padding: 8px 12px calc(var(--safe-bottom) + 8px);

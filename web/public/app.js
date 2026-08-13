@@ -1285,8 +1285,8 @@ function renderLog(force) {
   log.innerHTML = older + logEntries.map((e0, idx) => {
     const e = isMasked() ? { ...e0, text: maskText(e0.text) } : e0;
     const ts = e.ts ? `<span class="ts">${e.ts.slice(11, 19)}</span> ` : "";
-    if (e.role === "user") return `<div class="entry user">${ts}${linkify(esc(e.text))}</div>`;
-    if (e.role === "assistant") return `<div class="entry assistant">${ts}${linkify(esc(e.text))}</div>`;
+    if (e.role === "user") return `<div class="entry user">${ts}${renderMarkdown(e.text)}</div>`;
+    if (e.role === "assistant") return `<div class="entry assistant">${ts}${renderMarkdown(e.text)}</div>`;
     const label = e.role === "thinking" ? t("detail.thinking") : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : t("detail.result");
     const body = e.role === "tool_use" ? renderToolUse(e) : linkify(esc(e.text));
     const more = e.truncated ? `<div class="load-full" data-i="${idx}">${t("detail.showFull", { limit: t("detail.truncateLabel") })}</div>` : "";
