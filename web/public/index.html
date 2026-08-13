@@ -200,7 +200,8 @@
   .entry .md-h2 { font-size: 1.08em; }
   .entry .md-h3, .entry .md-h4 { font-size: 1em; color: var(--accent); }
   .entry ul, .entry ol { margin: 2px 0 2px 1.2em; padding: 0; }
-  .entry li { margin: 1px 0; }
+  .entry li { margin: 1px 0; white-space: normal; }
+  .entry .md-h, .entry .md-quote { white-space: normal; }
   .entry code { background: rgba(110,118,129,.25); border-radius: 4px; padding: 0 4px;
                 font-family: "SF Mono", Menlo, monospace; font-size: .92em; }
   .entry pre.md-code { background: #010409; border: 1px solid var(--border); border-radius: 6px;
@@ -208,6 +209,13 @@
                        font-family: "SF Mono", Menlo, monospace; font-size: .9em;
                        white-space: pre; }
   .entry pre.md-code code { background: none; padding: 0; }
+  /* 表。狭い画面では収まらないので、表だけを横スクロールさせる */
+  .entry .md-table-wrap { overflow-x: auto; margin: 5px 0; }
+  .entry .md-table { border-collapse: collapse; font-size: .95em; }
+  .entry .md-table th, .entry .md-table td {
+    border: 1px solid var(--border); padding: 4px 9px; white-space: nowrap; }
+  .entry .md-table th { background: rgba(110,118,129,.18); font-weight: 600; }
+  .entry .md-table tbody tr:nth-child(even) td { background: rgba(110,118,129,.07); }
   .entry .md-quote { border-left: 3px solid var(--border); padding-left: 8px; color: var(--dim); margin: 2px 0; }
   .entry .md-hr { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
   .entry strong { font-weight: 700; }

@@ -182,7 +182,36 @@ function renderMarkdown(text) {
     list = kind;
   };
 
-  for (const line of lines) {
+  // | で始まり | で終わる行。セル内の \| は列区切りとみなさない
+  const isRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+  // |---|:--:|---| のような区切り行。ここで列の寄せも決まる
+  const alignsOf = (l) => /^\s*\|[\s:|-]+\|\s*$/.test(l)
+    ? l.trim().slice(1, -1).split("|").map(c => {
+        const t = c.trim();
+        return t.startsWith(":") && t.endsWith(":") ? "center" : t.endsWith(":") ? "right" : "left";
+      })
+    : null;
+  const cellsOf = (l) => l.trim().slice(1, -1).split(/(?<!\\)\|/).map(c => mdInline(c.trim().replace(/\\\|/g, "|")));
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    // ---- 表 ----
+    if (fence === null && isRow(line)) {
+      const aligns = alignsOf(lines[li + 1] ?? "");
+      if (aligns) {
+        closeList();
+        const head = cellsOf(line);
+        const body = [];
+        let n = li + 2;
+        while (n < lines.length && isRow(lines[n])) { body.push(cellsOf(lines[n])); n++; }
+        const th = head.map((c, i) => `<th style="text-align:${aligns[i] ?? "left"}">${c}</th>`).join("");
+        const tr = body.map(cs =>
+          `<tr>${cs.map((c, i) => `<td style="text-align:${aligns[i] ?? "left"}">${c}</td>`).join("")}</tr>`).join("");
+        out.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`);
+        li = n - 1;
+        continue;
+      }
+    }
     const fenceM = line.match(/^\s*```(\w*)\s*$/);
     if (fenceM) {
       if (fence === null) { closeList(); fence = fenceM[1] || ""; buf = []; }
@@ -208,8 +237,12 @@ function renderMarkdown(text) {
   }
   if (fence !== null) out.push(`<pre class="md-code"><code>${buf.join("\n")}</code></pre>`);
   closeList();
-  // 元の改行は CSS の white-space に任せる(<br> を挟むと箇条書きが崩れる)
-  return out.join("\n");
+  // white-space: pre-wrap なので、ブロック要素の前後に残った空行がそのまま
+  // 余白になってしまう。隣がブロックなら空行を落とす
+  const isBlock = (x) => /^<(div|ul|ol|pre|hr|table)/.test(x || "");
+  const cleaned = out.filter((x, i) =>
+    !(x === "" && (isBlock(out[i - 1]) || isBlock(out[i + 1]))));
+  return cleaned.join("\n");
 }
 
 // ---------------- ツール入力の整形 ----------------
