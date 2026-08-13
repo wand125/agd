@@ -169,7 +169,8 @@ export async function remoteSessions(h: RemoteHost): Promise<Session[]> {
 }
 
 // ---- 画面キャプチャ ----
-export async function remoteCapture(h: RemoteHost, paneId: string, lines = 60): Promise<string> {
+export async function remoteCapture(h: RemoteHost, paneId: string,
+    lines = Number(process.env.AGD_SCROLLBACK || 200)): Promise<string> {
   // -e で色を保持。-S -N で少し遡り、-J で折り返しを結合しない(桁ズレ防止)
   return shRemote(h, `tmux capture-pane -p -e -t '${paneId}' -S -${lines} 2>/dev/null`);
 }

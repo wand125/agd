@@ -14,6 +14,7 @@ osascript(Apple Events)と違い常駐接続なので ms 級で応答し、キ�
 """
 import asyncio
 import json
+import os
 import sys
 
 import iterm2
@@ -121,6 +122,10 @@ async def handle_op(app, msg) -> dict:
         return {"type": "op", "id": oid, "ok": False, "error": str(e)}
 
 
+# 遡って取り込む行数(サーバー側の AGD_SCROLLBACK と揃える)
+SCROLLBACK = int(os.environ.get("AGD_SCROLLBACK", "200"))
+
+
 async def capture_all(app) -> dict:
     screens = {}
     for w in app.terminal_windows:
@@ -130,9 +135,22 @@ async def capture_all(app) -> dict:
                     tty = await s.async_get_variable("tty")
                     if not tty:
                         continue
-                    contents = await s.async_get_screen_contents()
-                    proto = contents._ScreenContents__proto
-                    lines = [line_to_ansi(lp) for lp in proto.contents]
+                    # 表示中の画面に加えてスクロールバックも取り込む。
+                    # カード内を上にスクロールして過去の出力を追えるようにする。
+                    # 古い API では range 指定が使えないので、その場合は現在画面のみ。
+                    lines = []
+                    try:
+                        info = await s.async_get_line_info()
+                        # 画面 + スクロールバックのうち、末尾 SCROLLBACK 行を取る
+                        have = info.scrollback_buffer_height + info.mutable_area_height
+                        want = min(SCROLLBACK, have)
+                        first = info.overflow + have - want
+                        lines = [line_to_ansi(lc._LineContents__proto)
+                                 for lc in await s.async_get_contents(first, want)]
+                    except Exception:
+                        # 古い API では range 取得ができない。現在の画面だけ返す
+                        contents = await s.async_get_screen_contents()
+                        lines = [line_to_ansi(lp) for lp in contents._ScreenContents__proto.contents]
                     screens[tty.replace("/dev/", "")] = "\n".join(lines).rstrip()
                 except Exception:
                     continue

@@ -189,9 +189,18 @@ const canOperate = (s) => !!s && !!s.running && (!!s.tty || !!s.remote);
 const target = (s) => ({ tty: s?.tty ?? "", cardKey: s?.key ?? "" });
 
 // ---------------- API ----------------
-async function api(path, body) {
-  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return r.json();
+async function api(path, body, timeoutMs = 15000) {
+  // 応答が返らないまま待ち続けると、送信中フラグが解除されず操作不能になる。
+  // 必ず上限を設けて中断する(呼び元は例外として受け取る)
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: ac.signal,
+    });
+    return await r.json();
+  } finally { clearTimeout(timer); }
 }
 async function fetchTranscript(s, params = {}) {
   const q = new URLSearchParams({ agent: s.agent, sid: s.sid, ...params });

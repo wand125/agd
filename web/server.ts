@@ -18,6 +18,8 @@ const CODEX_INDEX = join(HOME, ".codex", "session_index.jsonl");
 const CLAUDE_PROJECTS = join(HOME, ".claude", "projects");
 const CLAUDE_HISTORY = join(HOME, ".claude", "history.jsonl");
 const POLL_MS = 2500;
+// 端末画面をどこまで遡って取り込むか(行)。AGD_SCROLLBACK で変えられる
+const SCROLLBACK = Number(process.env.AGD_SCROLLBACK || 200);
 const BUSY_WINDOW_S = 20;
 const RECENT_LIMIT = 10;
 
@@ -436,7 +438,8 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   const tmuxTargets = [...need].filter(t => paneByTty.has(t));
   await Promise.all(tmuxTargets.map(async t => {
     const p = paneByTty.get(t)!;
-    const text = await sh(["tmux", "capture-pane", "-p", "-e", "-t", p.paneId, "-S", "-5"]);
+    // 遡る行数。カード内を上にスクロールして過去の出力を追えるようにする
+    const text = await sh(["tmux", "capture-pane", "-p", "-e", "-t", p.paneId, "-S", `-${SCROLLBACK}`]);
     if (text) result.set(t, text.trimEnd());
   }));
   // Python API ヘルパーの新鮮なデータがあれば優先(色付き)

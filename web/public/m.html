@@ -45,6 +45,10 @@
   .counts { display: flex; gap: 8px; font-size: 13px; margin-left: auto; }
   .counts b { font-weight: 600; }
   .c-waiting { color: var(--waiting); } .c-busy { color: var(--busy); } .c-idle { color: var(--idle); }
+  /* 接続状態。既定(接続済み)は何も出さず、異常時だけ点で知らせる */
+  #conn { width: 7px; height: 7px; border-radius: 50%; flex: none; display: none; }
+  #conn.offline { display: block; background: var(--waiting); animation: blink 1s infinite; }
+  #conn.readonly { display: block; background: var(--dim); animation: none; }
   .hbtn { background: none; border: none; color: var(--dim); padding: 6px; cursor: pointer;
           display: inline-flex; align-items: center; justify-content: center; }
   /* 線画アイコン。currentColor で色が決まるので状態に応じて CSS だけで変えられる */
@@ -222,7 +226,7 @@
 
 <header>
   <h1>agd</h1>
-  <span id="conn" style="font-size:11px;color:var(--dim)"></span>
+  <span id="conn" title=""></span>
   <span class="counts" id="counts"></span>
   <button class="hbtn" id="btn-q" aria-label="Search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>

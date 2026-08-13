@@ -193,6 +193,8 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     reset(false);
     if (e.touches.length !== 1) return;
     const t = e.touches[0];
+    // ボタン(応答・ピン)を押しているときはスワイプでも長押しでもない
+    if (t.target.closest?.("button")) { row = key = null; swiping = false; return; }
     row = t.target.closest?.(".row") ?? null;
     key = row?.dataset.k ?? null;
     x0 = t.clientX; y0 = t.clientY; dir = null;
@@ -455,7 +457,9 @@ function toast(msg) {
 
 // ---------------- 起動 ----------------
 agd.onSnapshot = (sessions, changes) => {
-  $("conn").textContent = readOnly ? t("m.readOnly") : "";
+  // 接続できていれば何も出さない。閲覧のみのときだけ灰色の点
+  $("conn").className = readOnly ? "readonly" : "";
+  $("conn").title = readOnly ? t("m.readOnly") : "";
   // 詰まりが増えた瞬間だけ知らせる(監視盤の主目的)
   for (const c of changes) if (c.to === "waiting") toast(t("m.needsInput", { name: c.name }));
   // 描画は最短1秒間隔。スクロール中に頻繁に差し替えない
@@ -466,7 +470,10 @@ agd.onSnapshot = (sessions, changes) => {
   const s = sessionOf(openKey);
   if (s) paintDetail(s);
 };
-agd.onDisconnect = () => { $("conn").textContent = t("m.connecting"); };
+agd.onDisconnect = () => {
+  $("conn").className = "offline";        // 赤く点滅させて切断を知らせる
+  $("conn").title = t("m.connecting");
+};
 // 前面に戻ったら止めていた分を取り戻す
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
@@ -486,7 +493,8 @@ loadConfig().then(c => {
   if (readOnly) {
     // 送信手段を出さない。押せるのに 403 になる状態が一番わかりにくい
     $("dsend").style.display = "none";
-    $("conn").textContent = t("m.readOnly");
+    $("conn").className = "readonly";
+    $("conn").title = t("m.readOnly");
   }
   connect();
 });
