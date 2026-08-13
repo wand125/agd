@@ -940,6 +940,15 @@ function keySplit(e) {
       // 右のペインへ渡る
       if (e.key === "l" || e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); setSplitPane("detail"); return true; }
       if (e.key === "i") { e.preventDefault(); setSplitPane("detail"); $("d-input").focus(); return true; }
+      // o は詳細の「ログ」へ。i(送信欄)と使い分ける
+      if (e.key === "o") {
+        e.preventDefault();
+        setSplitPane("detail");
+        const es = detailEntryEls();
+        detailSel = es.length ? es.length - 1 : -1;   // 最新のログから辿り始める
+        updateDetailSel();
+        return true;
+      }
     } else {
       // 右(詳細)にいるとき、左端で h / ← なら一覧へ戻る
       if ((e.key === "h" || e.key === "ArrowLeft") && detailSel < 0) { e.preventDefault(); setSplitPane("list"); return true; }
@@ -1335,7 +1344,12 @@ $("d-input").onkeydown = (e) => {
   if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey
       && e.target.selectionStart === e.target.selectionEnd) { e.preventDefault(); resumeContinue(detailKey); return; }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDetail(); }  // ⇧⏎ は改行
-  if (e.key === "Escape") $("d-input").blur();  // スクロールモードへ(閉じるのは q/Esc)
+  if (e.key === "Escape") {
+    $("d-input").blur();                      // スクロールモードへ(閉じるのは q/Esc)
+    // 並列ビューでは入力を抜けたら左のセッションリストへ戻る。
+    // 右ペインに留まると次の j/k がログ選択になり、一覧を辿れなくなるため
+    if (activeTab === "split") setSplitPane("list");
+  }
 };
 $("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = t("hint.detailInsert"); };
 $("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = t("hint.detailScroll"); };
