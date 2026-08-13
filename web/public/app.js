@@ -950,8 +950,14 @@ function keySplit(e) {
         return true;
       }
     } else {
-      // 右(詳細)にいるとき、左端で h / ← なら一覧へ戻る
-      if ((e.key === "h" || e.key === "ArrowLeft") && detailSel < 0) { e.preventDefault(); setSplitPane("list"); return true; }
+      // 右(詳細)にいるとき h / ← で一覧へ戻る。ログを選択中でも戻れるように
+      // 折りたたみには割り当てない(開閉は Enter で行う)
+      if (e.key === "h" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        detailSel = -1; updateDetailSel(false);   // 選択を解いてから戻る
+        setSplitPane("list");
+        return true;
+      }
       if (e.key === "Escape" && document.activeElement !== $("d-input")) { e.preventDefault(); setSplitPane("list"); return true; }
     }
   }
