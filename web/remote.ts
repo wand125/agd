@@ -148,9 +148,13 @@ export async function remoteSessions(h: RemoteHost): Promise<Session[]> {
   for (const p of panes) {
     if (usedPane.has(p.paneId)) continue;
     if (!/^(claude|codex|node)$/.test(p.cmd)) continue;
+    // cmd が node のときは実体が分からない。tmux のセッション名(codex:0.0 など)
+    // から推測する。誤って claude 扱いにすると、同名のカードが並んだときに
+    // どちらか判別できなくなる
+    const isCodex = p.cmd === "codex" || /(^|\W)codex/i.test(p.target);
     out.push({
-      key: `${p.cmd === "codex" ? "codex" : "claude"}:${h.host}:${p.paneId}`,
-      agent: p.cmd === "codex" ? "codex" : "claude",
+      key: `${isCodex ? "codex" : "claude"}:${h.host}:${p.paneId}`,
+      agent: isCodex ? "codex" : "claude",
       sid: "",
       name: `${label}/${p.target}`,
       cwd: p.cwd,

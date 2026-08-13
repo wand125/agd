@@ -1352,6 +1352,18 @@ async function poll() {
       .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.ageS - b.ageS)
       // リモートは tty を持たず pollRemotes が s.screen を埋めているので温存する
       .map(s => ({ ...s, screen: (s as RemoteSession).screen ?? screens.get(s.tty), summary: summariesMap.get(baseKey(s.key)) }));
+    // キーはカードの同一性そのもの。重複すると選択が複数行に出るなど表示が壊れるため、
+    // 最後に必ず一意化する(リモートは pid を持たず assignStableKeys の対象外)
+    {
+      const seen = new Set<string>();
+      for (const s of sessions) {
+        if (!seen.has(s.key)) { seen.add(s.key); continue; }
+        let i = 2, k = `${s.key}#${i}`;
+        while (seen.has(k)) k = `${s.key}#${++i}`;
+        s.key = k;
+        seen.add(k);
+      }
+    }
     lastSnapshot = { sessions, at: Date.now() };
     const changes = detectChanges(running);
     fireSummaries(changes, running);
