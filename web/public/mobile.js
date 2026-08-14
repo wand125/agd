@@ -238,10 +238,11 @@ function openSheet(key) {
   if (!s) return;
   sheetKey = key;
   $("sheet-title").textContent = `${projName(s.cwd)} · ${s.agent}`;
+  resetKill();                 // 前回の確認待ちを持ち越さない
   $("sheet-bg").classList.add("on");
   if (navigator.vibrate) navigator.vibrate(10);   // 長押しが効いたことを触感で返す
 }
-function closeSheet() { $("sheet-bg").classList.remove("on"); sheetKey = null; }
+function closeSheet() { $("sheet-bg").classList.remove("on"); sheetKey = null; resetKill(); }
 
 // 背景(シート外)のタップで閉じる
 $("sheet-bg").onclick = (e) => { if (e.target === $("sheet-bg")) closeSheet(); };
@@ -261,6 +262,36 @@ async function launchFrom(key, dup) {
 }
 $("sheet-new").onclick = () => launchFrom(sheetKey, false);
 $("sheet-dup").onclick = () => launchFrom(sheetKey, true);
+
+// セッションの終了。取り消せない操作なので、一度目のタップでは実行せず
+// 文言と色を変えて確認を求める(スマホは押し間違いが起きやすい)
+let killArmed = false;
+function resetKill() {
+  killArmed = false;
+  const b = $("sheet-kill");
+  b.classList.remove("armed");
+  b.textContent = t("m.killSession");
+}
+$("sheet-kill").onclick = async () => {
+  const s = sessionOf(sheetKey);
+  if (!s) return;
+  if (!killArmed) {
+    killArmed = true;
+    const b = $("sheet-kill");
+    b.classList.add("armed");
+    b.textContent = t("m.killConfirm");
+    if (navigator.vibrate) navigator.vibrate(10);
+    return;
+  }
+  const name = maskText(s.name);
+  closeSheet();
+  try {
+    const r = await api("/api/close", { ...target(s), cardKey: s.key });
+    toast((r.result || "").startsWith("ok") ? t("m.killed", { name }) : t("m.killFailed"));
+  } catch {
+    toast(t("m.killFailed"));
+  }
+};
 
 // ---------------- 詳細 ----------------
 async function openDetail(key) {

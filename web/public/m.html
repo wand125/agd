@@ -235,6 +235,9 @@
                background: #21262d; border: 1px solid var(--border); color: var(--fg); }
   .sheet-btn:active { background: var(--accent); color: #0d1117; }
   .sheet-btn.cancel { background: none; color: var(--dim); }
+  /* 破壊的な操作。確認前は輪郭だけ、確認待ちになったら塗って知らせる */
+  .sheet-btn.danger { color: var(--waiting); border-color: rgba(248,81,73,.5); }
+  .sheet-btn.danger.armed { background: var(--waiting); color: #fff; border-color: var(--waiting); }
   @keyframes sheetUp { from { transform: translateY(100%); } }
   @keyframes fadeIn { from { opacity: 0; } }
 
@@ -274,6 +277,7 @@
     <div id="sheet-title"></div>
     <button class="sheet-btn" id="sheet-new" data-i18n="m.launchNew">New session here</button>
     <button class="sheet-btn" id="sheet-dup" data-i18n="m.launchDup">Duplicate</button>
+    <button class="sheet-btn danger" id="sheet-kill" data-i18n="m.killSession">Close this session</button>
     <button class="sheet-btn cancel" id="sheet-cancel" data-i18n="m.cancel">Cancel</button>
   </div>
 </div>
