@@ -695,10 +695,14 @@ function buildRow(s, running) {
     resumeBtn.onclick = () => resumeSession(s);
   }
   row.appendChild(btns);
-  row.querySelector(".card-title").onclick = () => {
+  // 行のどこを押しても選べるようにする。タイトルだけだと、要約やパスの上を
+  // クリックしても反応せず「切り替わらない」ように見えていた
+  row.onclick = (e) => {
+    if (e.target.closest("button, .row-pin, .row-btns")) return;   // 操作ボタンは除く
     if (activeTab === "split") { listKey = s.key; updateListSelection(); syncSplitDetail(); setSplitPane("detail"); }
     else openDetail(s.key);
   };
+  row.style.cursor = "pointer";
   return row;
 }
 
