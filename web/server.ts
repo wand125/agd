@@ -337,12 +337,27 @@ function codexRecent(excludeSids: Set<string>): Session[] {
 }
 
 // ---------------------------------------------------------------- 画面キャプチャ
+// tmux の実体パス。GUI(app バンドル)から起動されると PATH が
+// /usr/bin:/bin:/usr/sbin:/sbin まで削られ、Homebrew の tmux を見つけられない。
+// 素の "tmux" だと tmux 内のセッションだけ画面が真っ白になるので実体を探して覚える。
+const TMUX_CANDIDATES = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"];
+let tmuxBinCache: string | undefined;
+function tmuxBin(): string {
+  if (tmuxBinCache === undefined)
+    tmuxBinCache = TMUX_CANDIDATES.find(p => { try { return statSync(p).isFile(); } catch { return false; } }) ?? "tmux";
+  return tmuxBinCache;
+}
+
 type TmuxPane = { tty: string; paneId: string; target: string };
+// 区切りはタブではなく "|" を使う。
+// tmux はロケール未設定(LANG が無い環境)だとタブを印字不能文字とみなして "_" に
+// 置換するため、launchd から起動された agd では \t 区切りが壊れてペインを1つも
+// 認識できなかった。"|" は tmux が加工しないうえ tty/pane_id/session 名に現れない
 async function tmuxPanes(): Promise<TmuxPane[]> {
-  const out = await sh(["tmux", "list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"]);
+  const out = await sh([tmuxBin(), "list-panes", "-a", "-F", "#{pane_tty}|#{pane_id}|#{session_name}:#{window_index}.#{pane_index}"]);
   return out.trim().split("\n").filter(Boolean).map(l => {
-    const [tty, paneId, target] = l.split("\t");
-    return { tty: tty.replace("/dev/", ""), paneId, target };
+    const [tty, paneId, target] = l.split("|");
+    return { tty: (tty ?? "").replace("/dev/", ""), paneId, target };
   });
 }
 
@@ -439,7 +454,7 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   await Promise.all(tmuxTargets.map(async t => {
     const p = paneByTty.get(t)!;
     // 遡る行数。カード内を上にスクロールして過去の出力を追えるようにする
-    const text = await sh(["tmux", "capture-pane", "-p", "-e", "-t", p.paneId, "-S", `-${SCROLLBACK}`]);
+    const text = await sh([tmuxBin(), "capture-pane", "-p", "-e", "-t", p.paneId, "-S", `-${SCROLLBACK}`]);
     if (text) result.set(t, text.trimEnd());
   }));
   // Python API ヘルパーの新鮮なデータがあれば優先(色付き)
@@ -591,9 +606,9 @@ async function sendToTty(tty: string, text: string): Promise<string> {
   const panes = await tmuxPanes();
   const pane = panes.find(p => p.tty === tty);
   if (pane) {
-    await sh(["tmux", "send-keys", "-t", pane.paneId, "-l", payload]);
+    await sh([tmuxBin(), "send-keys", "-t", pane.paneId, "-l", payload]);
     await Bun.sleep(150);
-    await sh(["tmux", "send-keys", "-t", pane.paneId, "Enter"]);
+    await sh([tmuxBin(), "send-keys", "-t", pane.paneId, "Enter"]);
     return "ok(tmux)";
   }
   const viaApi = await helperOp("send", { tty, text });
@@ -642,9 +657,9 @@ async function sendKeyToTty(tty: string, key: string): Promise<string> {
   const panes = await tmuxPanes();
   const pane = panes.find(p => p.tty === tty);
   if (pane) {
-    if (key === "ShiftTab") await sh(["tmux", "send-keys", "-t", pane.paneId, "BTab"]);
-    else if (NAMED_KEYS.has(key)) await sh(["tmux", "send-keys", "-t", pane.paneId, key]);
-    else await sh(["tmux", "send-keys", "-t", pane.paneId, "-l", key]);
+    if (key === "ShiftTab") await sh([tmuxBin(), "send-keys", "-t", pane.paneId, "BTab"]);
+    else if (NAMED_KEYS.has(key)) await sh([tmuxBin(), "send-keys", "-t", pane.paneId, key]);
+    else await sh([tmuxBin(), "send-keys", "-t", pane.paneId, "-l", key]);
     return "ok(tmux)";
   }
   const viaApi = await helperOp("key", { tty, keys: [key] });
@@ -715,7 +730,7 @@ async function closeTty(tty: string): Promise<string> {
   const panes = await tmuxPanes();
   const pane = panes.find(p => p.tty === tty);
   if (pane) {
-    await sh(["tmux", "kill-pane", "-t", pane.paneId]);
+    await sh([tmuxBin(), "kill-pane", "-t", pane.paneId]);
     return "ok(tmux)";
   }
   const viaApi = await helperOp("close", { tty });
@@ -766,15 +781,41 @@ on run argv
   end tell
 end run`;
 
+// ---- tmux 内で起動する ----
+// 素の tty で起動すると外(Neo/iPhone 等)から attach できない。tmux 内なら
+// 切断してもセッションが残り、外出先の端末から attach して続きを触れる。
+// AGD_TMUX=0 で従来どおり素の tty 起動に戻せる。
+const USE_TMUX = !/^(0|false|no)$/i.test(process.env.AGD_TMUX || "");
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+// tmux が実在するか。PATH は当てにならないので tmuxBin() の解決結果で判断する
+function hasTmux(): boolean { return tmuxBin() !== "tmux"; }
+
+// tmux セッション名。ペイン単位で使い捨てるのではなく、agd から起こしたものは
+// agd-<連番> という独立セッションにする(名前が衝突すると attach 先が紛れるため)
+let tmuxSeq = 0;
+function nextTmuxName(): string {
+  // 秒 + 連番。再起動をまたいでも既存名と当たりにくい
+  return `agd-${Math.floor(Date.now() / 1000).toString(36)}${(tmuxSeq++).toString(36)}`;
+}
+
+// agent 起動コマンドを tmux 内で走らせる形に包む。
+// 終了後すぐペインが消えると落ちた理由が読めないので、シェルを残して確認できるようにする
+function wrapTmux(inner: string): string {
+  if (!USE_TMUX || !hasTmux()) return inner;
+  // 起動されるターミナル側も PATH が細い場合があるため tmux は絶対パスで呼ぶ
+  return `${tmuxBin()} new-session -s ${shq(nextTmuxName())} ${shq(inner + "; exec $SHELL")}`;
+}
+
 // fork=true: 会話履歴を引き継ぎつつ新しいセッションIDに分岐する。
 // 素の resume で複製すると両プロセスが同一トランスクリプトに追記してログが交錯するため、
 // 実行中セッションの複製(Ctrl+C)は必ず fork を使う
 async function openResume(agent: string, sid: string, cwd: string, fork = false): Promise<string> {
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const cmd = agent === "claude"
+  const q = shq;
+  const inner = agent === "claude"
     ? `cd ${q(cwd)} && claude --resume ${sid}${fork ? " --fork-session" : ""}`
     : `cd ${q(cwd)} && codex ${fork ? "fork" : "resume"} ${sid}`;
-  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT);
+  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT);
   return "ok";
 }
 
@@ -1051,9 +1092,8 @@ function enrichHits(raw: { path: string; agent: string; sid: string; mtime: numb
 
 // ---------------------------------------------------------------- 新規セッション起動
 async function openNew(agent: string, cwd: string): Promise<string> {
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const cmd = `cd ${q(cwd)} && ${agent === "codex" ? "codex" : "claude"}`;
-  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT);
+  const inner = `cd ${shq(cwd)} && ${agent === "codex" ? "codex" : "claude"}`;
+  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT);
   return "ok";
 }
 

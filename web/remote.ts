@@ -65,10 +65,12 @@ export type RemotePane = {
 };
 
 export async function remotePanes(h: RemoteHost): Promise<RemotePane[]> {
-  const fmt = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_tty}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_pid}";
+  // 区切りは "|"。tmux はロケール未設定の環境だとタブを "_" に置換してしまい
+  // 列がずれる(ローカル側で実害が出たため合わせる)。cwd に "|" は通常現れない
+  const fmt = "#{pane_id}|#{session_name}:#{window_index}.#{pane_index}|#{pane_tty}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}";
   const out = await shRemote(h, `tmux list-panes -a -F '${fmt}' 2>/dev/null`);
   return out.trim().split("\n").filter(Boolean).flatMap(l => {
-    const [paneId, target, tty, cmd, cwd, pid] = l.split("\t");
+    const [paneId, target, tty, cmd, cwd, pid] = l.split("|");
     if (!paneId || !target) return [];
     return [{ host: h.host, paneId, target, tty: tty ?? "", cmd: cmd ?? "", cwd: cwd ?? "", pid: Number(pid) || 0 }];
   });
