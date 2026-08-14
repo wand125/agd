@@ -105,8 +105,24 @@ cat > "$APP/Contents/Info.plist" <<INFO
 </dict>
 </plist>
 INFO
-if command -v magick > /dev/null && [[ -f "$REPO_DIR/web/public/favicon-256.png" ]]; then
-  magick "$REPO_DIR/web/public/favicon-256.png" "$APP/Contents/Resources/agd.icns" 2>/dev/null || true
+# アイコン。macOS 標準の sips + iconutil で .icns を組む(追加ツール不要)。
+# 以前は magick が無いと PNG をそのまま .icns という名前で置いていて、
+# Finder や Dock で正しく表示されないことがあった。
+SRC_ICON="$REPO_DIR/web/public/apple-touch-icon.png"
+[[ -f "$SRC_ICON" ]] || SRC_ICON="$REPO_DIR/web/public/favicon-256.png"
+if [[ -f "$SRC_ICON" ]]; then
+  ICONSET="$(mktemp -d)/agd.iconset"
+  mkdir -p "$ICONSET"
+  for sz in 16 32 128 256 512; do
+    sips -z $sz $sz "$SRC_ICON" --out "$ICONSET/icon_${sz}x${sz}.png" > /dev/null 2>&1
+    sips -z $((sz*2)) $((sz*2)) "$SRC_ICON" --out "$ICONSET/icon_${sz}x${sz}@2x.png" > /dev/null 2>&1
+  done
+  if iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/agd.icns" 2>/dev/null; then
+    echo "  アイコンを生成しました"
+  else
+    cp "$SRC_ICON" "$APP/Contents/Resources/agd.icns"   # 最低限は表示できるように
+  fi
+  rm -rf "$(dirname "$ICONSET")"
 fi
 touch "$APP"
 # Spotlight / Finder から見つかるよう LaunchServices に登録

@@ -1476,6 +1476,10 @@ try {
       return new Response(Bun.file(join(import.meta.dir, "public", "favicon.ico")));
     if (url.pathname === "/favicon-256.png")
       return new Response(Bun.file(join(import.meta.dir, "public", "favicon-256.png")));
+    // ホーム画面に追加したときのアイコン。iOS は角を自前で丸めるため、
+    // 角丸を焼き込んでいない正方形の画像を渡す
+    if (url.pathname === "/apple-touch-icon.png" || url.pathname === "/apple-touch-icon-precomposed.png")
+      return new Response(Bun.file(join(import.meta.dir, "public", "apple-touch-icon.png")));
     if (url.pathname === "/api/sessions")
       return Response.json(lastSnapshot);
     if (url.pathname === "/api/projects") {
