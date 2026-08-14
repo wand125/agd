@@ -142,6 +142,22 @@ cookie afterwards. Requests without it get 401 — including from localhost, bec
 | `AGD_BIND` | bind address (default `127.0.0.1`). Binding elsewhere without `AGD_TOKEN` refuses to start |
 | `AGD_READONLY` | reject every mutating API — view only |
 
+## Development
+
+```bash
+bun install          # dev dependencies only
+bun run check        # typecheck + tests
+```
+
+`bun test` covers the pure logic (transcript parsing, prompt detection, tmux output parsing);
+everything touching terminals is verified by hand. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+agd can type into your terminal sessions, so reaching its port is equivalent to shell access.
+It binds to `127.0.0.1` and refuses to bind elsewhere without a token. See
+[SECURITY.md](SECURITY.md) before exposing it to a network, and to report a vulnerability.
+
 ## License
 
 [MIT](LICENSE)

@@ -1,0 +1,38 @@
+{
+  "name": "agd",
+  "version": "0.1.0",
+  "description": "A keyboard-driven dashboard for running many Claude Code and Codex CLI sessions in parallel on macOS",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wand125/agd.git"
+  },
+  "homepage": "https://github.com/wand125/agd#readme",
+  "bugs": {
+    "url": "https://github.com/wand125/agd/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "dashboard",
+    "tmux",
+    "iterm2",
+    "macos",
+    "bun"
+  ],
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agd": "bin/agd"
+  },
+  "scripts": {
+    "start": "bun run web/server.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.7.0"
+  }
+}

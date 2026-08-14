@@ -1,5 +1,6 @@
 .DS_Store
 nohup.out
+node_modules/
 __pycache__/
 *.pyc
 web/.venv/
