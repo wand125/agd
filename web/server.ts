@@ -1440,6 +1440,22 @@ try {
   idleTimeout: 60,
   async fetch(req, server) {
     const url = new URL(req.url);
+    // アイコンは Cookie 無しで取りに来る(iOS のホーム画面追加など)。
+    // 機密を含まないので認証前に返す
+    const PUBLIC_ASSETS = new Set([
+      "/favicon.ico", "/favicon-256.png",
+      "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png",
+      "/manifest.webmanifest",
+    ]);
+    if (PUBLIC_ASSETS.has(url.pathname)) {
+      const name = url.pathname === "/apple-touch-icon-precomposed.png"
+        ? "apple-touch-icon.png" : url.pathname.slice(1);
+      const type = name.endsWith(".ico") ? "image/x-icon"
+        : name.endsWith(".webmanifest") ? "application/manifest+json" : "image/png";
+      return new Response(Bun.file(join(import.meta.dir, "public", name)), {
+        headers: { "Content-Type": type, "Cache-Control": "no-cache" },
+      });
+    }
     if (!authed(req, url, server.requestIP(req)?.address)) {
       // ?token=... で来たら Cookie に載せ替えて以後の往復を楽にする
       return new Response("unauthorized", {
