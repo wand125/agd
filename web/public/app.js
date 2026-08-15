@@ -663,17 +663,24 @@ function buildRow(s, running) {
   row.className = "resume-row" + (closing.has(s.key) ? " closing" : "")
     + (pinned.includes(s.key) ? " pinned" : "");
   row.dataset.key = s.key;
+  // 2行構成。1行目に識別情報(名前・プロジェクト・状態)、2行目に要約を置く。
+  // 以前は全部を1行に詰めていたため、名前が 32% 幅で切られ、要約も同じ行の
+  // 残りを奪い合って、どちらも読めないことが多かった
   row.innerHTML = `
     <button class="row-pin" data-i18n-title="card.pin" title="Pin">
       <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></svg>
     </button>
     <span class="dot"></span>
-    <span class="agent-tag">${s.agent}</span>
-    <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
-    <span class="card-title"></span>
-    <span class="row-summary"></span>
-    <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
-    <span class="card-meta"></span>`;
+    <div class="row-main">
+      <div class="row-line1">
+        <span class="agent-tag">${s.agent}</span>
+        <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
+        <span class="card-title"></span>
+        <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
+        <span class="card-meta"></span>
+      </div>
+      <div class="row-line2"><span class="row-summary"></span></div>
+    </div>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
   row.querySelector(".row-pin").onclick = (e) => { e.stopPropagation(); togglePin(s.key); };
   row.querySelector(".card-title").innerHTML =
@@ -681,6 +688,9 @@ function buildRow(s, running) {
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
+  // 要約が無いセッションは2行目ごと畳んで、従来どおりの1行の高さに保つ。
+  // CSS の :empty は親要素(.row-line2)には効かないためここで消す
+  row.querySelector(".row-line2").style.display = s.summary ? "" : "none";
   row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)} · ${fmtAge(s.ageS)}`;
   const btns = document.createElement('span');
   btns.className = "row-btns";
