@@ -640,7 +640,7 @@ async function runCommand(c) {
           renderPromptBar($("d-prompt"), s);
           loadSubagents(s);
         }
-        $("d-kbd-hint").innerHTML = $("d-input") === document.activeElement ? t("hint.detailInsert") : t("hint.detailScroll");
+        updateDetailHint(sessionOf(detailKey));
         renderLog(false);
       }
       if ($("new-overlay").classList.contains("show")) renderNewList();
@@ -722,6 +722,19 @@ function gitBadge(g) {
   if (g.ahead) out += ` ↑${g.ahead}`;
   if (g.behind) out += ` ↓${g.behind}`;
   return out;
+}
+
+// 詳細画面の入力欄まわりの案内。選択待ちのときは ⏎ の意味が変わる
+// (空欄なら「送信」ではなく「選択の確定」)ため、文言を差し替える。
+// 複数選択ではチェックを付けたあとの確定手段がこれになる
+function updateDetailHint(s) {
+  const waiting = s?.status === "waiting" && !!s.prompt?.options?.length;
+  const ph = waiting ? "detail.inputPlaceholderWaiting" : "detail.inputPlaceholder";
+  // placeholder は言語切替で data-i18n-ph から再適用されるため、値ではなく属性を差し替える
+  $("d-input").dataset.i18nPh = ph;
+  $("d-input").placeholder = t(ph);
+  $("d-kbd-hint").innerHTML = $("d-input") === document.activeElement ? t("hint.detailInsert")
+    : waiting ? t("hint.detailWaiting") : t("hint.detailScroll");
 }
 
 // ---------------- 選択プロンプト応答 ----------------
@@ -1315,7 +1328,7 @@ async function openDetail(key) {
   $("d-jump").onclick = () => jump(key);
   renderPromptBar($("d-prompt"), s);
   $("d-input").blur();  // デフォルトはスクロールモード。i で入力モードへ
-  $("d-kbd-hint").innerHTML = t("hint.detailScroll");
+  updateDetailHint(s);
   await loadLog(s, true);
   clearInterval(logTimer);
   logTimer = setInterval(() => {
@@ -1492,8 +1505,8 @@ $("d-input").onkeydown = (e) => {
     if (activeTab === "split") setSplitPane("list");
   }
 };
-$("d-input").onfocus = () => { $("d-kbd-hint").innerHTML = t("hint.detailInsert"); };
-$("d-input").onblur = () => { hideHints(); $("d-kbd-hint").innerHTML = t("hint.detailScroll"); };
+$("d-input").onfocus = () => { updateDetailHint(sessionOf(detailKey)); };
+$("d-input").onblur = () => { hideHints(); updateDetailHint(sessionOf(detailKey)); };
 
 // ---------------- ログ横断検索 ----------------
 async function runSearch(q) {

@@ -88,6 +88,8 @@ const STRINGS = {
     "detail.jump": "⌖ Jump",
     "detail.subagent": "Show subagent log",
     "detail.inputPlaceholder": "Send to this session… (⏎ send / ⇧⏎ newline / Esc to scroll mode)",
+    // 選択待ちのとき。空欄で ⏎ を押すと確定(複数選択のチェック後もこれで送る)
+    "detail.inputPlaceholderWaiting": "Empty + ⏎ to confirm the selection / type to send a message",
     "detail.loadOlder": "Load older entries",
     "detail.screenUnavailable": "(no screen available because this session is not running)",
     "detail.main": "Main",
@@ -173,6 +175,9 @@ const STRINGS = {
     "prompt.confirm": "⏎ Confirm",
     "hint.detailScroll": "<kbd>j/k</kbd>select <kbd>d/u</kbd>±5 <kbd>⏎</kbd>toggle <kbd>1-9</kbd>answer <kbd>i</kbd>input <kbd>s</kbd>interrupt <kbd>^N</kbd>duplicate <kbd>^C</kbd>fork <kbd>:</kbd>cmd <kbd>q</kbd>close",
     "hint.detailInsert": "<kbd>⏎</kbd>send <kbd>⇧⏎</kbd>newline <kbd>Esc</kbd>scroll mode",
+    // 選択待ちのときだけ出す。詳細のノーマルモードでは ⏎ がログの開閉に
+    // 割り当たっているため、確定するには入力欄に入る必要があることを示す
+    "hint.detailWaiting": "<kbd>1-9</kbd>answer <kbd>i</kbd>then empty <kbd>⏎</kbd>to confirm <kbd>s</kbd>interrupt <kbd>q</kbd>close",
 
     // ---- directions ----
     "dir.up": "up",
@@ -326,6 +331,8 @@ const STRINGS = {
     "detail.jump": "⌖ ジャンプ",
     "detail.subagent": "サブエージェントのログを表示",
     "detail.inputPlaceholder": "このセッションに送信…(⏎送信 / ⇧⏎改行 / Escでスクロールモード)",
+    // 選択待ちのとき。空欄で ⏎ を押すと確定(複数選択のチェック後もこれで送る)
+    "detail.inputPlaceholderWaiting": "空欄のまま⏎で選択を確定 / 文字を入力すればメッセージ送信",
     "detail.loadOlder": "以前のログを読み込む",
     "detail.screenUnavailable": "(実行中でないため画面はありません)",
     "detail.main": "本体",
@@ -411,6 +418,9 @@ const STRINGS = {
     "prompt.confirm": "⏎ 確定",
     "hint.detailScroll": "<kbd>j/k</kbd>選択 <kbd>d/u</kbd>±5 <kbd>⏎</kbd>開閉 <kbd>1-9</kbd>応答 <kbd>i</kbd>入力 <kbd>s</kbd>中断 <kbd>^N</kbd>複製 <kbd>^C</kbd>引継 <kbd>:</kbd>cmd <kbd>q</kbd>閉じる",
     "hint.detailInsert": "<kbd>⏎</kbd>送信 <kbd>⇧⏎</kbd>改行 <kbd>Esc</kbd>スクロールモードへ",
+    // 選択待ちのときだけ出す。詳細のノーマルモードでは ⏎ がログの開閉に
+    // 割り当たっているため、確定するには入力欄に入る必要があることを示す
+    "hint.detailWaiting": "<kbd>1-9</kbd>応答 <kbd>i</kbd>で入力欄へ→空欄<kbd>⏎</kbd>で確定 <kbd>s</kbd>中断 <kbd>q</kbd>閉じる",
 
     // ---- directions ----
     "dir.up": "上",
