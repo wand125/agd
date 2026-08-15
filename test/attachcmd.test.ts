@@ -94,8 +94,10 @@ describe("ssh 先ホストの決定", () => {
     expect(make("192.168.11.8", "somethingelse")).toBe("192.168.11.8");
   });
 
-  test("サーバーが名前を返せなくても localhost のまま壊れて出ない", () => {
-    // 貼っても動かないのは同じだが、少なくとも undefined を混ぜない
-    expect(make("localhost", "")).toBe("localhost");
+  test("サーバーが名前を返さないときは空を返す(ループバックを渡さない)", () => {
+    // ループバックのまま渡すと、手元のマシンが自分自身に ssh してしまう。
+    // 実際に Neo で踏んだ: Neo 自身の tmux に繋がり "no current target" で終わった。
+    // 呼び出し側はこの空を見てコマンドではなく理由を出す
+    for (const h of ["localhost", "127.0.0.1", "::1"]) expect(make(h, "")).toBe("");
   });
 });

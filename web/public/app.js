@@ -841,7 +841,12 @@ async function jump(key) {
 // その場合はサーバーが自分のホスト名を教えてくれるまで m4 を既定にする
 function sshHost() {
   const h = location.hostname;
-  return /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(h) ? (window.agdSshHost || h) : h;
+  if (!/^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(h)) return h;
+  // ループバックのまま返すと「手元のマシンから手元のマシンへ ssh する」
+  // コマンドを渡すことになる。ポートフォワード越しに見ている場合、それは
+  // 母艦ではなく手元の tmux に繋がり "no current target" で終わる(実際に踏んだ)。
+  // サーバーが名前を教えてくれない = 古い agd が動いているので、そう伝える
+  return window.agdSshHost || "";
 }
 // textarea の自動リサイズ(改行で上に伸びる)
 function autoGrow(ta, max) {
@@ -877,6 +882,9 @@ let attachInfo = null;
 // ブラウザを別マシン(Neo など)で開いている場合、母艦の画面を前面に出しても
 // 手元には何も見えないため、手元で貼れるコマンドを出すのが唯一の届く手段になる
 function openAttach(info) {
+  // ssh 先が分からないまま貼れるコマンドを出すと、手元のマシン自身に ssh して
+  // しまう。動かないコマンドを渡すより、なぜ出せないかを伝える方がよい
+  if (info.copyOnly && !info.host) { toast(t("attach.noHost")); return; }
   attachInfo = info;
   $("attach-msg").innerHTML = info.copyOnly
     ? t("attach.copyBody", { host: esc(info.host) })
