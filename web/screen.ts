@@ -5,9 +5,14 @@
 
 export type PromptInfo = {
   question?: string;
-  options: { key: string; label: string }[];
+  options: { key: string; label: string; description?: string }[];
   kind?: "numbered" | "cursor" | "form";   // cursor: 矢印+Enterで選ぶ形式 / form: 複数項目を設定して確定
   cursorIndex?: number;           // cursor/form での現在のカーソル行
+  // トランスクリプト由来(AskUserQuestion)。画面解析と違いラベルが確実で
+  // description も取れる。ただし選択の実行は結局キー送信なので、
+  // カーソル位置だけは画面から補う必要がある
+  source?: "screen" | "transcript";
+  multiSelect?: boolean;
 };
 
 export type TmuxPane = { tty: string; paneId: string; target: string };
@@ -104,6 +109,47 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     return { options: [] };
   }
   return null;
+}
+
+// ------------------------------------------------- トランスクリプト由来の選択肢
+// AskUserQuestion は tool_use としてトランスクリプトに構造化されて残る。
+// 画面解析と違い ANSI も列崩れも幅切れも無く、description まで取れるため、
+// 選択肢が取れる場面ではこちらを正とする。
+//
+// 「未応答か」は、対応する tool_result がまだ書かれていないことで判定する。
+// 応答済みのものを拾うと、待機していないセッションにボタンが出てしまう。
+export function detectAskPrompt(lines: string[]): PromptInfo | null {
+  const asks = new Map<string, any>();
+  const answered = new Set<string>();
+  for (const l of lines) {
+    // JSON.parse は高くつくので、関係する行だけに絞ってから解く
+    if (!l.includes("AskUserQuestion") && !l.includes("tool_result")) continue;
+    let o: any; try { o = JSON.parse(l); } catch { continue; }
+    const c = o?.message?.content;
+    if (!Array.isArray(c)) continue;
+    for (const b of c) {
+      if (!b || typeof b !== "object") continue;
+      if (b.type === "tool_use" && b.name === "AskUserQuestion" && b.id) asks.set(b.id, b.input);
+      else if (b.type === "tool_result" && b.tool_use_id) answered.add(b.tool_use_id);
+    }
+  }
+  // 最後の未応答のものが「今聞かれていること」
+  let pending: any = null;
+  for (const [id, input] of asks) if (!answered.has(id)) pending = input;
+  const q = pending?.questions?.[0];
+  if (!q || !Array.isArray(q.options) || q.options.length < 2) return null;
+  return {
+    question: typeof q.question === "string" ? q.question.slice(0, 120) : undefined,
+    options: q.options.slice(0, 8).map((o: any, i: number) => ({
+      key: String(i + 1),
+      label: String(o?.label ?? "").slice(0, 70),
+      description: typeof o?.description === "string" ? o.description.slice(0, 200) : undefined,
+    })),
+    kind: "numbered",
+    cursorIndex: 0,
+    source: "transcript",
+    multiSelect: !!q.multiSelect,
+  };
 }
 
 // 設定フォームの行を拾う。ウィジェットの形でしか判定しない(ラベル文字列に

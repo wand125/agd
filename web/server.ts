@@ -5,7 +5,7 @@ import { readdirSync, statSync, existsSync, readFileSync, openSync, readSync, cl
 import { join } from "path";
 import { readTranscript, truncateEntry, type LogEntry } from "./transcript";
 import {
-  detectPrompt, parseTmuxPanes, TMUX_PANE_FORMAT,
+  detectPrompt, detectAskPrompt, parseTmuxPanes, TMUX_PANE_FORMAT,
   type PromptInfo, type TmuxPane,
 } from "./screen";
 import {
@@ -951,6 +951,32 @@ function aiTitleOf(path: string): string {
   return title;
 }
 
+// 未応答の AskUserQuestion をトランスクリプトから取る。画面解析より確実で
+// description も取れるため、取れた場合はこちらを優先する。
+// ai-title と同じく末尾だけ読み、mtime が変わらなければ再走査しない
+const askCache = new Map<string, { mtime: number; prompt: PromptInfo | null }>();
+function askPromptForSid(sid: string): PromptInfo | null {
+  const path = findClaudeTranscript(sid);
+  if (!path) return null;
+  let st;
+  try { st = statSync(path); } catch { return null; }
+  const c = askCache.get(path);
+  if (c && c.mtime === st.mtimeMs) return c.prompt;
+  let prompt: PromptInfo | null = null;
+  try {
+    // 質問と応答は近接して現れるので末尾だけで足りる
+    const TAIL = 512 * 1024;
+    const start = Math.max(0, st.size - TAIL);
+    const fd = openSync(path, "r");
+    const buf = Buffer.alloc(st.size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    closeSync(fd);
+    prompt = detectAskPrompt(buf.toString("utf8").split("\n"));
+  } catch {}
+  askCache.set(path, { mtime: st.mtimeMs, prompt });
+  return prompt;
+}
+
 // sid だけ分かっている場合(実行中セッション)の表示名解決
 function aiTitleForSid(sid: string): string {
   const p = findClaudeTranscript(sid);
@@ -1383,10 +1409,18 @@ function fixZombieBusy(running: Session[]) {
 function applyPrompts(running: Session[], screens: Map<string, string>) {
   for (const s of running) {
     const p = detectPrompt(screens.get(s.tty));
-    if (!p) continue;
-    s.prompt = p;
+    // AskUserQuestion はトランスクリプトに構造化されて残るため、そちらを正とする。
+    // ただし採用は「画面にも選択プロンプトが出ている」ときだけ。転記だけを根拠に
+    // すると、応答直後でまだ tool_result が書かれていない一瞬に、待機していない
+    // セッションへボタンを出してしまう
+    const ask = s.agent === "claude" && p?.options.length ? askPromptForSid(s.sid) : null;
+    // 選択の実行はキー送信なので、カーソル位置だけは画面の値を使う
+    const merged = ask && ask.options.length === p!.options.length
+      ? { ...ask, cursorIndex: p!.cursorIndex ?? 0 } : (ask ?? p);
+    if (!merged) continue;
+    s.prompt = merged;
     // 誤検出防止: waiting への昇格は「番号付き選択肢」または「codexのカーソル選択」のみ
-    const confident = p.kind === "numbered" || (s.agent === "codex" && p.kind === "cursor");
+    const confident = merged.kind === "numbered" || (s.agent === "codex" && merged.kind === "cursor");
     if (confident && s.status === "idle") s.status = "waiting";
   }
 }

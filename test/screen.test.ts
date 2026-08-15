@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { parseTmuxPanes, detectPrompt, TMUX_PANE_FORMAT } from "../web/screen";
+import { parseTmuxPanes, detectPrompt, detectAskPrompt, TMUX_PANE_FORMAT } from "../web/screen";
 
 describe("parseTmuxPanes", () => {
   test("パイプ区切りの通常出力を解析する", () => {
@@ -201,5 +201,61 @@ describe("detectPrompt", () => {
     test("素のカーソル選択はフォームにしない", () => {
       expect(detectPrompt(["Select?", " ❯ Yes", "   No"].join("\n"))?.kind).toBe("cursor");
     });
+  });
+});
+
+// 画面解析はラベルが幅で切れたり、横に並んだパネルの文字が混ざったりする。
+// AskUserQuestion は tool_use として構造化されて残るので、そちらを正とする
+describe("detectAskPrompt", () => {
+  const ask = (id: string, input: any) =>
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "AskUserQuestion", input }] } });
+  const result = (id: string) =>
+    JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "answered" }] } });
+  const q1 = {
+    questions: [{
+      question: "ライセンスはどれにしますか?",
+      multiSelect: false,
+      options: [
+        { label: "MIT (Recommended)", description: "最も一般的で採用されやすい" },
+        { label: "Apache-2.0", description: "特許条項付き" },
+      ],
+    }],
+  };
+
+  test("未応答の質問を選択肢として返す", () => {
+    const p = detectAskPrompt([ask("t1", q1)]);
+    expect(p?.source).toBe("transcript");
+    expect(p?.question).toBe("ライセンスはどれにしますか?");
+    expect(p?.options.map(o => o.label)).toEqual(["MIT (Recommended)", "Apache-2.0"]);
+  });
+
+  // 画面からは取れない情報。ツールチップに出す
+  test("description も取れる", () => {
+    expect(detectAskPrompt([ask("t1", q1)])?.options[0]?.description).toBe("最も一般的で採用されやすい");
+  });
+
+  // 応答済みを拾うと、待機していないセッションにボタンが出てしまう
+  test("応答済みの質問は返さない", () => {
+    expect(detectAskPrompt([ask("t1", q1), result("t1")])).toBeNull();
+  });
+
+  test("応答済みが混ざっていても未応答のものを選ぶ", () => {
+    const q2 = { questions: [{ question: "次は?", options: [{ label: "A" }, { label: "B" }] }] };
+    const p = detectAskPrompt([ask("t1", q1), result("t1"), ask("t2", q2)]);
+    expect(p?.question).toBe("次は?");
+  });
+
+  test("multiSelect を保持する", () => {
+    const m = { questions: [{ question: "どれ?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] }] };
+    expect(detectAskPrompt([ask("t1", m)])?.multiSelect).toBe(true);
+  });
+
+  test("AskUserQuestion が無ければ null", () => {
+    expect(detectAskPrompt(["", "{}", "壊れたJSON"])).toBeNull();
+  });
+
+  test("壊れた行があっても落ちない", () => {
+    expect(() => detectAskPrompt(["{AskUserQuestion 壊れてる", ask("t1", q1)])).not.toThrow();
+    expect(detectAskPrompt(["{AskUserQuestion 壊れてる", ask("t1", q1)])?.options.length).toBe(2);
   });
 });

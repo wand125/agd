@@ -730,7 +730,8 @@ function renderPromptBar(bar, s) {
   if (p?.question) html += `<div class="prompt-q" title="${escAttr(maskText(p.question))}">${esc(maskText(p.question))}</div>`;
   if (opts.length && p.kind === "numbered") {
     html += opts.map((o, i) =>
-      `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${escAttr(o.key)}" data-index="${i}" title="${escAttr(maskText(o.label))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
+      // description はトランスクリプト由来のときだけ付く(画面には収まらない補足)
+      `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${escAttr(o.key)}" data-index="${i}" title="${escAttr(maskText(o.label + (o.description ? "\n" + o.description : "")))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
     ).join("");
   } else if (opts.length && p.kind === "cursor") {
     // カーソル選択: クリックで ↑/↓×n → Enter を送る
