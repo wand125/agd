@@ -34,6 +34,14 @@ export function parseTmuxPanes(out: string): TmuxPane[] {
 }
 
 // ---------------------------------------------------------------- 選択プロンプト検出
+// カーソル記号は claude の ❯(U+276F)と codex の ›(U+203A)の両方を受け付ける。
+// 対応エージェントが増えたときに一箇所だけ直せばよいよう定数にまとめる
+// (以前は同じ文字クラスが6箇所に散っていた)
+const CURSOR = "❯›";
+const CURSOR_LINE = new RegExp(`^\\s*[${CURSOR}]\\s+\\S`);   // カーソルが乗っている行
+const CURSOR_HEAD = new RegExp(`^\\s*[${CURSOR}]?\\s*`);     // 行頭のカーソル記号(無くてもよい)
+const CURSOR_HEAD_REQ = new RegExp(`^\\s*[${CURSOR}]\\s*`);  // 同上(カーソル必須)
+
 // Claude の許可プロンプト/AskUserQuestion は「❯ 1. Yes」形式の番号付き選択肢、
 // codex 等は「❯ Yes」形式のカーソル選択。画面末尾から検出する。
 export function detectPrompt(screen: string | undefined): PromptInfo | null {
@@ -43,7 +51,6 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     .replace(/\x1b\[[0-9;]*m/g, "")
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
     .replace(/\x00/g, " ");
-  // カーソル記号は claude の ❯(U+276F)と codex の ›(U+203A)の両方を受け付ける
   // 横に並んだ別パネル(ノート欄など)が同じ行に混ざる。│ を空白に潰すだけだと
   // 右側のパネルの文章がそのまま選択肢ラベルに流れ込むため、最初の縦罫線より
   // 右は切り捨てる。ただし行頭の枠線は本文の左端なので対象外
@@ -51,7 +58,7 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     const cut = l.replace(/^\s*[│┃]/, m => " ".repeat(m.length)).search(/[│┃╭╮╰╯┌┐└┘]/);
     return (cut > 0 ? l.slice(0, cut) : l).replace(/[│┃]/g, " ").trimEnd();
   });
-  const optRe = /^\s*([❯›])?\s*(\d+)\.\s+(.+)$/;
+  const optRe = new RegExp(`^\\s*([${CURSOR}])?\\s*(\\d+)\\.\\s+(.+)$`);
   const opts: { key: string; label: string }[] = [];
   let hasCursor = false, firstIdx = -1, numCursorIdx = 0;
   lines.forEach((l, i) => {
@@ -86,11 +93,11 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
   const inputAt = lines.findIndex(l => /^[─━]{20,}$/.test(l.trim()));
   const searchFrom = inputAt >= 0 ? inputAt : 0;
   const cursorIdx = lines.findIndex((l, i) =>
-    i >= searchFrom && /^\s*[❯›]\s+\S/.test(l) && !optRe.test(l));
+    i >= searchFrom && CURSOR_LINE.test(l) && !optRe.test(l));
   if (cursorIdx >= 0) {
     // カーソル行の上下に連続する「選択肢らしい行」をブロックとして解析
     const isOpt = (l: string | undefined) => {
-      const t = (l ?? "").replace(/^\s*[❯›]?\s*/, "").trim();
+      const t = (l ?? "").replace(CURSOR_HEAD, "").trim();
       return t.length > 0 && t.length <= 80 &&
         !/[??]$/.test(t) &&                       // 質問文
         !/[┌┐└┘─╭╮╰╯═━]/.test(t) &&               // 罫線
@@ -103,7 +110,7 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     while (end < lines.length - 1 && isOpt(lines[end + 1])) end++;
     const copts: { key: string; label: string }[] = [];
     for (let i = start; i <= end; i++)
-      copts.push({ key: `opt:${i - start}`, label: (lines[i] ?? "").replace(/^\s*[❯›]?\s*/, "").trim().slice(0, 70) });
+      copts.push({ key: `opt:${i - start}`, label: (lines[i] ?? "").replace(CURSOR_HEAD, "").trim().slice(0, 70) });
     if (copts.length >= 2 && copts.length <= 8)
       return { question: findQuestion(start), options: copts, kind: "cursor", cursorIndex: cursorIdx - start };
     return { options: [] };
@@ -159,7 +166,7 @@ const FORM_WIDGET = /(◀\s*.+?\s*▶|\[[ xX✔✓*]\])\s*$/;
 const FORM_SUBMIT = /^(Continue|Confirm|Done|OK|Save|Submit|続ける|確定|完了|保存)$/i;
 
 function detectForm(lines: string[]): PromptInfo | null {
-  const strip = (l: string) => (l ?? "").replace(/^\s*[❯›]\s*/, "").trim();
+  const strip = (l: string) => (l ?? "").replace(CURSOR_HEAD_REQ, "").trim();
   const rows: { key: string; label: string; line: number }[] = [];
   let submit = -1;
   lines.forEach((l, i) => {
@@ -174,7 +181,7 @@ function detectForm(lines: string[]): PromptInfo | null {
   rows.push({ key: `form:${rows.length}`, label: strip(lines[submit]!).slice(0, 70), line: submit });
   // カーソルは項目行にも確定ボタン行にも乗りうる。フォーム全体の見出しにも "❯"
   // が付くことがあるので、行番号ではなく「フォームの行のうちカーソル付きのもの」を探す
-  const idx = rows.findIndex(r => /^\s*[❯›]\s+\S/.test(lines[r.line] ?? ""));
+  const idx = rows.findIndex(r => CURSOR_LINE.test(lines[r.line] ?? ""));
   // 質問文はウィジェット行より上にある(先頭行が "❯ ...?" のこともある)
   let question: string | undefined;
   for (let i = rows[0]!.line - 1; i >= 0; i--) {

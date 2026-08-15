@@ -308,6 +308,22 @@ const sendKeys = (s, keys) => api("/api/key", { ...target(s), keys });
 const focusSession = (s) => api("/api/focus", s?.remote ? { cardKey: s.key } : { tty: s?.tty ?? "" });
 const closeSession = (s) => api("/api/close", { ...target(s) });
 
+// ---------------- トースト ----------------
+// 画面下に一時表示する通知。body に挿すだけでビュー固有の要素を要さないので
+// 共通層に置く(以前は PC/モバイルで別実装になっており、表示時間が
+// 2500ms と 2200ms に食い違っていた)
+let toastTimer = null;
+function toast(msg) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  document.body.appendChild(el);
+  // 前回のタイマーを止めないと、古い timeout が新しいトーストを消してしまう
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 2500);
+}
+
 // ---------------- 許可プロンプトへの応答 ----------------
 // n は 1 始まり。claude の番号型だけが数字キーで直接選べ、それ以外(codex の
 // 番号型・両者のカーソル型)は ↑↓ で移動してから Enter で確定する必要がある。

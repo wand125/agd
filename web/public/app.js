@@ -86,15 +86,7 @@ function toggleMaskView() {
 }
 // ---------------- ANSI カラー → HTML ----------------
 
-let toastTimer = null;
-function toast(msg) {
-  document.querySelectorAll(".toast").forEach(t => t.remove());
-  const t = document.createElement('div');
-  t.className = "toast"; t.textContent = msg;
-  document.body.appendChild(t);
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 2500);
-}
+// toast() は core.js に移動(PC/モバイルで実装が分かれ表示時間が食い違っていたため)
 
 // ---------------- WebSocket ----------------
 // スマホ幅で PC 版を開いたら /m を提案する。閉じたら記憶して二度と出さない
@@ -800,32 +792,23 @@ function renderPromptBar(bar, s) {
 // ---------------- 操作 ----------------
 // 数字キーで許可プロンプトの選択肢に応答(番号型/カーソル型両対応)。グリッド・詳細・リストで共用
 // n番目の選択肢まで ↑/↓ を送って Enter で確定(カーソル移動方式)
-function answerByCursor(s, n) {
-  const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
-  const move = Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up");
-  // フォームは行ごとに操作が違う(詳細は core.js の answerPrompt と同じ理由)。
-  // Enter を一律に送ると、チェックを切り替えたつもりで確定してしまう
-  if (s.prompt.kind === "form") {
-    const label = s.prompt.options[n - 1]?.label ?? "";
-    const last = /(◀|▶)/.test(label) ? "Right" : /\[[ xX✔✓*]\]/.test(label) ? "Space" : "Enter";
-    api("/api/key", { ...target(s), keys: [...move, last] })
-      .then(() => toast(t(last === "Enter" ? "toast.optionConfirmed" : "toast.optionToggled", { n })));
-    return;
-  }
-  api("/api/key", { ...target(s), keys: [...move, "Enter"] }).then(() => toast(t("toast.optionConfirmed", { n })));
-}
+// どのキーを送るかは core.js の answerPrompt が持つ(ビューに依らないため)。
+// ここはトーストの出し分けだけを担う。
+//
+// 以前は同じキー選択ロジックを app.js 側にも複製していたが、フォーム対応を
+// 入れたときに両方へ同じ修正を書く羽目になった。片方だけ直すと PC 版でだけ
+// 壊れる形の分岐なので、送信の判断は core に一本化する
 function answerPromptByNumber(sessKey, n) {
   const s = sessionOf(sessKey);
-  if (!(s?.status === "waiting" && canOperate(s) && s.prompt)) return false;
-  const count = (s.prompt.options ?? []).length;
-  if (n > count) return false;
-  if (s.prompt.kind === "numbered" && s.agent === "claude") {
-    // claude の番号付きプロンプトは数字キーで直接選択できる
-    api("/api/key", { ...target(s), key: String(n) }).then(() => toast(t("toast.numberSent", { n })));
-    return true;
-  }
-  // codex の番号付き・両者のカーソル型はカーソル移動+Enter で確定
-  answerByCursor(s, n);
+  const r = answerPrompt(s, n);
+  if (!r) return false;   // 待機中でない・範囲外
+  // 何をしたのかで文言を変える。フォームのウィジェット行は「切り替え」、
+  // それ以外は「確定」
+  const label = s.prompt.options[n - 1]?.label ?? "";
+  const toggled = s.prompt.kind === "form" && /(◀|▶|\[[ xX✔✓*]\])/.test(label);
+  const msg = s.prompt.kind === "numbered" && s.agent === "claude" ? "toast.numberSent"
+    : toggled ? "toast.optionToggled" : "toast.optionConfirmed";
+  r.then(() => toast(t(msg, { n }))).catch(e => toast(t("toast.sendFailed", { err: String(e?.message ?? e) })));
   return true;
 }
 // 空欄 Enter での「確定」: 入力待ちセッションにのみ Enter キーを送る(誤爆防止)
@@ -1323,7 +1306,6 @@ async function openDetail(key) {
   $("d-latest").style.display = "none";
   setScreen($("d-screen"), s.screen ?? t("detail.screenUnavailable"));
   $("d-screen").scrollTop = $("d-screen").scrollHeight;
-  $("d-input").dataset.tty = s.tty ?? "";
   $("d-jump").style.display = s.tty || s.remote ? "" : "none";
   $("d-jump").onclick = () => jump(key);
   renderPromptBar($("d-prompt"), s);

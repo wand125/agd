@@ -488,13 +488,7 @@ $("dinput").onkeydown = (e) => {
 };
 
 // ---------------- 通知(タブが背面でも気づけるように) ----------------
-function toast(msg) {
-  document.querySelectorAll(".toast").forEach(t => t.remove());
-  const t = document.createElement("div");
-  t.className = "toast"; t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2200);
-}
+// toast() は core.js に移動(PC版と実装が分かれていたため)
 
 // ---------------- 起動 ----------------
 agd.onSnapshot = (sessions, changes) => {
