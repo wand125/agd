@@ -663,9 +663,9 @@ function buildRow(s, running) {
   row.className = "resume-row" + (closing.has(s.key) ? " closing" : "")
     + (pinned.includes(s.key) ? " pinned" : "");
   row.dataset.key = s.key;
-  // 2行構成。1行目に識別情報(名前・プロジェクト・状態)、2行目に要約を置く。
-  // 以前は全部を1行に詰めていたため、名前が 32% 幅で切られ、要約も同じ行の
-  // 残りを奪い合って、どちらも読めないことが多かった
+  // 既定は1行(リストタブは横幅が広い)。並列ビューでは左ペインが狭いため
+  // CSS 側で .row-main を縦積みにし、要約だけが2行目へ落ちる。
+  // card-meta は行末に置きたいので .row-main の外に出している
   row.innerHTML = `
     <button class="row-pin" data-i18n-title="card.pin" title="Pin">
       <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></svg>
@@ -677,10 +677,10 @@ function buildRow(s, running) {
         <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
         <span class="card-title"></span>
         <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
-        <span class="card-meta"></span>
       </div>
       <div class="row-line2"><span class="row-summary"></span></div>
-    </div>`;
+    </div>
+    <span class="card-meta"></span>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
   row.querySelector(".row-pin").onclick = (e) => { e.stopPropagation(); togglePin(s.key); };
   row.querySelector(".card-title").innerHTML =

@@ -93,9 +93,18 @@
                  align-items: center; justify-content: center; color: var(--dim);
                  font-size: 13px; z-index: 4; }
   body.split-detail.no-selection #split-empty { display: flex; }
-  /* 並列時はセッション行を詰めて、限られた幅に多く収める。
-     左ペインが狭いので2行目(要約)は畳んで1行に戻す */
-  #views.split .row-line2 { display: none; }
+  /* 並列時は左ペインが狭く1行に収まらないため、要約を2行目へ送る。
+     リストタブは横に長いので既定どおり1行のまま */
+  #views.split .row-main { display: flex; flex-direction: column; gap: 1px; align-items: stretch; }
+  #views.split .row-line2 { display: flex; }
+  /* 要約は 560px の左ペインに1行では収まらない(実測で約8割が溢れる)ので、
+     省略記号で切らずに2行まで折り返す。3行以上は行が高くなりすぎて
+     一覧としての俯瞰性を損なうため -webkit-line-clamp で頭打ちにする */
+  #views.split .row-summary {
+    white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; text-overflow: clip;
+    line-height: 1.35; word-break: break-word;
+  }
   /* 画面一覧タブ(固定高・ページネーション) */
   #grid-view { flex: 1; min-height: 0; padding: 10px 32px; position: relative; }
   #views.split #grid-view { padding: 10px 26px; }
@@ -159,8 +168,10 @@
   #tab-split svg rect { fill: currentColor; stroke: none; }
   h2.section { padding: 8px 0 4px; font-size: 12px; color: var(--dim); font-weight: 600; }
   .rows { display: flex; flex-direction: column; gap: 2px; }
-  /* 2行になったのでピン・ドット・操作ボタンは上端に揃える(中央だと要約の分だけ下がる) */
-  .resume-row { display: flex; align-items: flex-start; gap: 6px; padding: 3px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
+  .resume-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
+  /* 並列ビューだけ行が2段になるので、ピン・ドット・パス・操作ボタンを上端に揃える
+     (中央のままだと要約の分だけ下にずれる) */
+  #views.split .resume-row { align-items: flex-start; padding: 3px 8px; }
   .resume-row.kbd-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* ピン留めした行は左端に印を付け、上位に固定されていることを示す */
   .resume-row.pinned { box-shadow: inset 3px 0 0 var(--busy); }
@@ -174,9 +185,11 @@
   .resume-row.pinned .row-pin svg path:first-child { fill: currentColor; }
   /* 2行構成。1行目=識別情報 / 2行目=要約。行を分けたことで名前の幅制限(旧 32%)が
      不要になり、長いセッション名もそのまま読める */
-  .row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .row-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .row-line2 { display: flex; min-width: 0; }
+  /* 既定は1行(リストタブは横幅が広く収まる)。1行目と2行目を横に並べ、
+     要約が1行目の続きに見えるようにする。並列ビューだけ縦積みに切り替える */
+  .row-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; }
+  .row-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+  .row-line2 { display: flex; min-width: 0; flex: 1 1 0; }
   .resume-row .card-title { font-weight: 400; font-size: 12.5px; cursor: pointer; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-row .btn { padding: 1px 8px; font-size: 11px; }
   .resume-row .card-meta { font-size: 10.5px; }
