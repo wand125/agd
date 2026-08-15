@@ -666,7 +666,7 @@ function buildRow(s, running) {
   // 既定は1行(リストタブは横幅が広い)。並列ビュー(左ペイン 560px)では
   // CSS 側で .row-main を縦積みにして3段になる:
   //   1行目 = 識別(エージェント・プロジェクト・名前・状態)
-  //   2行目 = AIタイトルとパス … 実測でここが最も長く、1行目に載せると溢れる
+  //   2行目 = パスとAIタイトル … 実測でここが最も長く、1行目に載せると溢れる
   //   3行目 = 要約(1行に収める)
   row.innerHTML = `
     <button class="row-pin" data-i18n-title="card.pin" title="Pin">
@@ -689,12 +689,12 @@ function buildRow(s, running) {
   // 名前だけを1行目に置く。AIタイトルは長い(実測40桁)ので2行目へ回す
   row.querySelector(".card-title").textContent = maskText(s.name);
   row.querySelector(".card-status").textContent = `${t(`status.${s.status}`)} · ${fmtAge(s.ageS)}`;
-  // 2行目: AIタイトル + パス。どちらも長くなりうるのでまとめてここに置く
+  // 2行目: パス + AIタイトル。どちらも長くなりうるのでまとめてここに置く
   const meta = row.querySelector(".card-meta");
   const title = s.title ? maskText(s.title) : "";
-  meta.innerHTML = (title ? `<span class="ai-title">${esc(title)}</span> ` : "")
-    + `<span class="row-cwd">${esc(shortCwd(s.cwd))}</span>`;
-  meta.title = `${title ? title + " · " : ""}${s.cwd}`;
+  meta.innerHTML = `<span class="row-cwd">${esc(shortCwd(s.cwd))}</span>`
+    + (title ? ` <span class="ai-title">${esc(title)}</span>` : "");
+  meta.title = `${s.cwd}${title ? " · " + title : ""}`;
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
@@ -713,7 +713,9 @@ function buildRow(s, running) {
     logBtn.onclick = () => openDetail(s.key);
     resumeBtn.onclick = () => resumeSession(s);
   }
-  row.appendChild(btns);
+  // ボタンは1行目に入れる。行全体の右に置くと3段ぶんの高さを占め、
+  // その左幅ぶんだけ2行目(パス+タイトル)と3行目(要約)が使えなくなる
+  row.querySelector(".row-line1").appendChild(btns);
   // 行のどこを押しても選べるようにする。タイトルだけだと、要約やパスの上を
   // クリックしても反応せず「切り替わらない」ように見えていた
   row.onclick = (e) => {
