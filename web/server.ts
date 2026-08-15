@@ -26,21 +26,59 @@ const POLL_MS = 2500;
 const SCROLLBACK = Number(process.env.AGD_SCROLLBACK || 200);
 const BUSY_WINDOW_S = 20;
 const RECENT_LIMIT = 10;
+const OSASCRIPT_TIMEOUT_MS = 3000;
 
 // ---------------------------------------------------------------- 共通ユーティリティ
-async function sh(cmd: string[], input?: string): Promise<string> {
+async function runCommand(cmd: string[], input?: string, timeoutMs?: number) {
+  const p = Bun.spawn(cmd, {
+    stdin: input ? new TextEncoder().encode(input) : undefined,
+    stderr: "pipe",
+  });
+  const outPromise = new Response(p.stdout).text();
+  const errPromise = new Response(p.stderr).text();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = timeoutMs === undefined ? false : await Promise.race([
+    p.exited.then(() => false),
+    new Promise<true>(resolve => { timer = setTimeout(() => resolve(true), timeoutMs); }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (timedOut) {
+    // Apple Events が詰まっても子プロセスを残さない。通常終了を少し待ち、だめなら強制終了する
+    try { p.kill("SIGTERM"); } catch {}
+    const exited = await Promise.race([
+      p.exited.then(() => true),
+      Bun.sleep(250).then(() => false),
+    ]);
+    if (!exited) {
+      try { p.kill("SIGKILL"); } catch {}
+    }
+  }
+  await p.exited;
+  const [out, err] = await Promise.all([outPromise, errPromise]);
+  return { out, err, timedOut };
+}
+
+async function sh(cmd: string[], input?: string, timeoutMs?: number): Promise<string> {
   try {
-    const p = Bun.spawn(cmd, { stdin: input ? new TextEncoder().encode(input) : undefined, stderr: "ignore" });
-    const out = await new Response(p.stdout).text();
-    await p.exited;
-    return out;
+    const r = await runCommand(cmd, input, timeoutMs);
+    return r.timedOut ? "" : r.out;
   } catch {
     return "";
   }
 }
 
-async function osascript(script: string, args: string[] = []): Promise<string> {
-  return sh(["osascript", "-e", script, ...args]);
+async function osascriptResult(script: string, args: string[] = [], timeoutMs = OSASCRIPT_TIMEOUT_MS) {
+  try {
+    const r = await runCommand(["osascript", "-e", script, ...args], undefined, timeoutMs);
+    const timedOut = r.timedOut || /AppleEvent timed out|-1712/i.test(r.err);
+    return { out: timedOut ? "" : r.out, timedOut };
+  } catch {
+    return { out: "", timedOut: false };
+  }
+}
+
+async function osascript(script: string, args: string[] = [], timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
+  return (await osascriptResult(script, args, timeoutMs)).out;
 }
 
 // ---------------------------------------------------------------- rollout メタキャッシュ
@@ -164,19 +202,52 @@ export type Session = {
   ageS: number;           // 最終アクティビティからの秒数(概算)
   prompt?: PromptInfo;    // 画面から検出した選択プロンプト
   git?: GitInfo;
+  stalled?: boolean;      // iTerm2 AppleScript がタイムアウトした tty は一時隔離する
   // ssh 越しの tmux ペイン。これがあるとキャプチャ・操作は remote 経由になる
   remote?: { host: string; paneId: string; target: string };
 };
 
+// `claude agents --json` はセッションが増えると 1 分前後かかることがある(実測 58〜88 秒)。
+// poll() から同期的に呼ぶとポーリングごと詰まって一覧が空になるため、ssh の remote 系と
+// 同じくキャッシュ + 独立タイマーに分離する。claudeRunning() はキャッシュを読むだけ。
 let lastClaudeRunning: { at: number; list: Session[] } = { at: 0, list: [] };
-async function claudeRunning(): Promise<Session[]> {
+const CLAUDE_RUNNING_STALE_MS = 300_000;  // 取得に 1 分かかるので短いと表示が点滅する
+let claudeRefreshInFlight = false;
+let lastSlowAgentsWarn = 0;
+
+function claudeRunning(): Session[] {
+  return Date.now() - lastClaudeRunning.at < CLAUDE_RUNNING_STALE_MS
+    ? lastClaudeRunning.list : [];
+}
+
+async function refreshClaudeRunning(): Promise<void> {
+  // 取得が 1 分かかる環境では、素朴なタイマーだと何十個も並走して事態が悪化する
+  if (claudeRefreshInFlight) return;
+  claudeRefreshInFlight = true;
+  try {
+    await refreshClaudeRunningInner();
+  } finally {
+    claudeRefreshInFlight = false;
+  }
+}
+
+async function refreshClaudeRunningInner(): Promise<void> {
+  const t0 = Date.now();
   const out = await sh(["claude", "agents", "--json"]);
+  const elapsed = Date.now() - t0;
+  // 遅いときだけ知らせる。毎回出すと遅い環境ではログが埋まる
+  if (elapsed >= 5000 && Date.now() - lastSlowAgentsWarn > 60_000) {
+    lastSlowAgentsWarn = Date.now();
+    console.log(`claude agents: ${(elapsed / 1000).toFixed(1)}s (遅延。セッション数が多い可能性)`);
+  }
   let arr: any[] = [];
   try { arr = JSON.parse(out); } catch {
-    // 一時的な失敗でカードが全消えしないよう、60秒以内の前回結果を返す
-    return Date.now() - lastClaudeRunning.at < 60_000 ? lastClaudeRunning.list : [];
+    // 一時的な失敗ではキャッシュを触らない(有効期限内なら前回値が使われる)
+    return;
   }
-  if (!arr.length) return [];
+  // 空の結果でキャッシュを潰さない。取得失敗と「本当に 0 件」は区別できないため、
+  // 消えるべきセッションは下の ps フィルタと有効期限切れに任せる
+  if (!arr.length) return;
   const pids = arr.map(a => a.pid).join(",");
   const psOut = await sh(["ps", "-o", "pid=,tty=", "-p", pids]);
   const ttyByPid = new Map<number, string>();
@@ -206,7 +277,6 @@ async function claudeRunning(): Promise<Session[]> {
     };
   });
   lastClaudeRunning = { at: Date.now(), list };
-  return list;
 }
 
 async function codexRunning(): Promise<Session[]> {
@@ -353,10 +423,27 @@ async function tmuxPanes(): Promise<TmuxPane[]> {
 
 // ---- iTerm2 Python API ヘルパー(色付き画面取得。使えないときは AppleScript にフォールバック) ----
 const itermScreens = new Map<string, { text: string; at: number }>();
+const stalledTtys = new Map<string, number>();
+const ITERM_STALL_MS = 60_000;
 let itermHelperOk = false;
 let helperProc: ReturnType<typeof Bun.spawn> | null = null;
 const helperOps = new Map<number, (r: { ok: boolean; error?: string }) => void>();
 let helperOpSeq = 0;
+
+function isTtyStalled(tty: string): boolean {
+  const until = stalledTtys.get(tty);
+  if (!until) return false;
+  if (until > Date.now()) return true;
+  stalledTtys.delete(tty);
+  console.log(`iterm2 tty ${tty}: stall cleared`);
+  return false;
+}
+
+function markTtyStalled(tty: string) {
+  const wasStalled = isTtyStalled(tty);
+  stalledTtys.set(tty, Date.now() + ITERM_STALL_MS);
+  if (!wasStalled) console.log(`iterm2 tty ${tty}: stalled 60s (osascript timeout)`);
+}
 
 // ヘルパー経由の操作(focus/send/key/close)。ms級で応答し Apple Events 渋滞と無縁。
 // 使えないとき(未接続・タイムアウト)は null を返し、呼び元が AppleScript にフォールバックする
@@ -421,18 +508,25 @@ function startItermHelper(retryMs = 5000) {
 }
 startItermHelper();
 
+const ITERM_SCREEN_PREFIX = "__AGD_SCREEN__";
 const ITERM_CAPTURE_SCRIPT = `
-tell application "iTerm2"
-  set out to ""
-  repeat with w in windows
-    repeat with t in tabs of w
-      repeat with s in sessions of t
-        set out to out & "\\u0001TTY:" & (tty of s) & "\\u0002" & (text of s)
+on run argv
+  set target to item 1 of argv
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            if tty of s is target then
+              return "${ITERM_SCREEN_PREFIX}" & (text of s)
+            end if
+          end repeat
+        end repeat
       end repeat
-    end repeat
-  end repeat
-  return out
-end tell`;
+    end tell
+  end timeout
+  return ""
+end run`;
 
 async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
@@ -447,22 +541,28 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
     const text = await sh([tmuxBin(), "capture-pane", "-p", "-e", "-t", p.paneId, "-S", `-${SCROLLBACK}`]);
     if (text) result.set(t, text.trimEnd());
   }));
+  // tmux 以外でタイムアウトした tty だけを一時除外し、他の Apple Events を巻き添えにしない
+  const itermNeed = [...need].filter(t => !paneByTty.has(t) && !isTtyStalled(t));
   // Python API ヘルパーの新鮮なデータがあれば優先(色付き)
-  for (const t of need) {
+  for (const t of itermNeed) {
     if (result.has(t)) continue;
     const cached = itermScreens.get(t);
     if (cached && Date.now() - cached.at < 15_000) result.set(t, cached.text);
   }
-  // AppleScript 一括取得はヘルパーが死んでいるときだけのフォールバック。
+  // AppleScript 取得はヘルパーが死んでいるときだけのフォールバック。
   // ヘルパー稼働中に毎サイクル併走させると iTerm2 の Apple Events が渋滞し、
   // フォーカスやキー送信まで遅くなる(iTerm2外のターミナルはどのみち取得不能)
-  if (!itermHelperOk && [...need].some(t => !result.has(t))) {
-    const raw = await osascript(ITERM_CAPTURE_SCRIPT.replace(/\\u0001/g, "\x01").replace(/\\u0002/g, "\x02"));
-    for (const chunk of raw.split("\x01")) {
-      if (!chunk.startsWith("TTY:")) continue;
-      const sep = chunk.indexOf("\x02");
-      const tty = chunk.slice(4, sep).replace("/dev/", "").trim();
-      if (need.has(tty) && !result.has(tty)) result.set(tty, chunk.slice(sep + 1).trimEnd());
+  if (!itermHelperOk) {
+    // 一括取得だと停止 tty を特定できないため直列に取得し、その tty だけを隔離する
+    for (const tty of itermNeed) {
+      if (result.has(tty)) continue;
+      const r = await osascriptResult(ITERM_CAPTURE_SCRIPT, [`/dev/${tty}`]);
+      if (r.timedOut) {
+        markTtyStalled(tty);
+        continue;
+      }
+      if (r.out.startsWith(ITERM_SCREEN_PREFIX))
+        result.set(tty, r.out.slice(ITERM_SCREEN_PREFIX.length).trimEnd());
     }
   }
   return result;
@@ -518,18 +618,20 @@ const ITERM_WRITE_SCRIPT = `
 on run argv
   set target to item 1 of argv
   set msg to item 2 of argv
-  tell application "iTerm2"
-    repeat with w in windows
-      repeat with t in tabs of w
-        repeat with s in sessions of t
-          if tty of s is target then
-            tell s to write text msg
-            return "ok"
-          end if
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            if tty of s is target then
+              tell s to write text msg
+              return "ok"
+            end if
+          end repeat
         end repeat
       end repeat
-    end repeat
-  end tell
+    end tell
+  end timeout
   return "not found"
 end run`;
 
@@ -548,10 +650,14 @@ async function sendToTty(tty: string, text: string): Promise<string> {
   }
   const viaApi = await helperOp("send", { tty, text });
   if (viaApi) return viaApi.ok ? "ok(api)" : "error: " + (viaApi.error ?? "helper");
-  const r = await shStrict(["osascript", "-", `/dev/${tty}`, "text", payload], ITERM_KEY_SCRIPT);
+  if (isTtyStalled(tty)) return "error: timeout";
+  const r = await shStrict(["osascript", "-", `/dev/${tty}`, "text", payload], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);
+  if (r === "error: timeout") markTtyStalled(tty);
   if (!r.startsWith("ok")) return r;
   await Bun.sleep(150);
-  return shStrict(["osascript", "-", `/dev/${tty}`, "enter", ""], ITERM_KEY_SCRIPT);
+  const enter = await shStrict(["osascript", "-", `/dev/${tty}`, "enter", ""], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);
+  if (enter === "error: timeout") markTtyStalled(tty);
+  return enter;
 }
 
 // 生キー送信(数字選択・y/n・Enter・Esc)。Enter を付けない
@@ -560,28 +666,30 @@ on run argv
   set theTarget to item 1 of argv
   set theKind to item 2 of argv
   set thePayload to item 3 of argv
-  tell application "iTerm2"
-    repeat with w in windows
-      repeat with t in tabs of w
-        repeat with s in sessions of t
-          if tty of s is theTarget then
-            if theKind is "enter" then
-              tell s to write text ""
-            else if theKind is "escape" then
-              tell s to write text (character id 27) newline NO
-            else if theKind is "csi" then
-              tell s to write text ((character id 27) & "[" & thePayload) newline NO
-            else if theKind is "tab" then
-              tell s to write text (character id 9) newline NO
-            else
-              tell s to write text thePayload newline NO
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            if tty of s is theTarget then
+              if theKind is "enter" then
+                tell s to write text ""
+              else if theKind is "escape" then
+                tell s to write text (character id 27) newline NO
+              else if theKind is "csi" then
+                tell s to write text ((character id 27) & "[" & thePayload) newline NO
+              else if theKind is "tab" then
+                tell s to write text (character id 9) newline NO
+              else
+                tell s to write text thePayload newline NO
+              end if
+              return "ok"
             end if
-            return "ok"
-          end if
+          end repeat
         end repeat
       end repeat
-    end repeat
-  end tell
+    end tell
+  end timeout
   return "not found"
 end run`;
 
@@ -604,21 +712,19 @@ async function sendKeyToTty(tty: string, key: string): Promise<string> {
   else if (key === "Escape") kind = "escape";
   else if (key === "Tab") kind = "tab";
   else if (CSI_MAP[key]) { kind = "csi"; payload = CSI_MAP[key]; }
-  const r = await shStrict(["osascript", "-", `/dev/${tty}`, kind, payload], ITERM_KEY_SCRIPT);
+  if (isTtyStalled(tty)) return "error: timeout";
+  const r = await shStrict(["osascript", "-", `/dev/${tty}`, kind, payload], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);
+  if (r === "error: timeout") markTtyStalled(tty);
   return r;
 }
 
 // stderr も見て AppleScript エラーを表面化させる版
-async function shStrict(cmd: string[], input?: string): Promise<string> {
+async function shStrict(cmd: string[], input?: string, timeoutMs?: number): Promise<string> {
   try {
-    const p = Bun.spawn(cmd, { stdin: input ? new TextEncoder().encode(input) : undefined, stderr: "pipe" });
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ]);
-    await p.exited;
-    if (out.trim()) return out.trim();
-    if (err.trim()) return "error: " + err.trim().split("\n")[0].slice(0, 200);
+    const r = await runCommand(cmd, input, timeoutMs);
+    if (r.timedOut || /AppleEvent timed out|-1712/i.test(r.err)) return "error: timeout";
+    if (r.out.trim()) return r.out.trim();
+    if (r.err.trim()) return "error: " + r.err.trim().split("\n")[0].slice(0, 200);
     return "ok";
   } catch (e: any) {
     return "error: " + (e?.message ?? String(e));
@@ -637,6 +743,7 @@ async function sendKeysToTty(tty: string, keys: string[]): Promise<string> {
   let last = "ok";
   for (const k of seq) {
     last = await sendKeyToTty(tty, k);
+    if (last === "error: timeout") break;
     await Bun.sleep(120);
   }
   return last;
@@ -646,18 +753,20 @@ async function sendKeysToTty(tty: string, keys: string[]): Promise<string> {
 const ITERM_CLOSE_SCRIPT = `
 on run argv
   set theTarget to item 1 of argv
-  tell application "iTerm2"
-    repeat with w in windows
-      repeat with t in tabs of w
-        repeat with s in sessions of t
-          if tty of s is theTarget then
-            close s
-            return "ok"
-          end if
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            if tty of s is theTarget then
+              close s
+              return "ok"
+            end if
+          end repeat
         end repeat
       end repeat
-    end repeat
-  end tell
+    end tell
+  end timeout
   return "not found"
 end run`;
 
@@ -670,34 +779,36 @@ async function closeTty(tty: string): Promise<string> {
   }
   const viaApi = await helperOp("close", { tty });
   if (viaApi) return viaApi.ok ? "ok(api)" : "error: " + (viaApi.error ?? "helper");
-  return shStrict(["osascript", "-", `/dev/${tty}`], ITERM_CLOSE_SCRIPT);
+  return shStrict(["osascript", "-", `/dev/${tty}`], ITERM_CLOSE_SCRIPT, OSASCRIPT_TIMEOUT_MS);
 }
 
 const ITERM_FOCUS_SCRIPT = `
 on run argv
   set target to item 1 of argv
-  tell application "iTerm2"
-    repeat with w in windows
-      repeat with t in tabs of w
-        repeat with s in sessions of t
-          if tty of s is target then
-            tell t to select
-            tell s to select
-            set index of w to 1
-            activate
-            return "ok"
-          end if
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with s in sessions of t
+            if tty of s is target then
+              tell t to select
+              tell s to select
+              set index of w to 1
+              activate
+              return "ok"
+            end if
+          end repeat
         end repeat
       end repeat
-    end repeat
-  end tell
+    end tell
+  end timeout
   return "not found"
 end run`;
 
 async function focusTty(tty: string): Promise<string> {
   const viaApi = await helperOp("focus", { tty });
   if (viaApi) return viaApi.ok ? "ok(api)" : "not found";
-  const r = await sh(["osascript", "-", `/dev/${tty}`], ITERM_FOCUS_SCRIPT);
+  const r = await sh(["osascript", "-", `/dev/${tty}`], ITERM_FOCUS_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   return r.trim();
 }
 
@@ -706,14 +817,16 @@ async function focusTty(tty: string): Promise<string> {
 const ITERM_NEWTAB_SCRIPT = `
 on run argv
   set cmd to item 1 of argv
-  tell application "iTerm2"
-    if (count of windows) is 0 then
-      create window with default profile
-    else
-      tell current window to create tab with default profile
-    end if
-    tell current session of current window to write text cmd
-  end tell
+  with timeout of 2 seconds
+    tell application "iTerm2"
+      if (count of windows) is 0 then
+        create window with default profile
+      else
+        tell current window to create tab with default profile
+      end if
+      tell current session of current window to write text cmd
+    end tell
+  end timeout
 end run`;
 
 // ---- tmux 内で起動する ----
@@ -750,7 +863,7 @@ async function openResume(agent: string, sid: string, cwd: string, fork = false)
   const inner = agent === "claude"
     ? `cd ${q(cwd)} && claude --resume ${sid}${fork ? " --fork-session" : ""}`
     : `cd ${q(cwd)} && codex ${fork ? "fork" : "resume"} ${sid}`;
-  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT);
+  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   return "ok";
 }
 
@@ -1028,7 +1141,7 @@ function enrichHits(raw: { path: string; agent: string; sid: string; mtime: numb
 // ---------------------------------------------------------------- 新規セッション起動
 async function openNew(agent: string, cwd: string): Promise<string> {
   const inner = `cd ${shq(cwd)} && ${agent === "codex" ? "codex" : "claude"}`;
-  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT);
+  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   return "ok";
 }
 
@@ -1040,7 +1153,7 @@ async function openRemoteAttach(h: RemoteHost, tmuxSession: string): Promise<str
   // リモート側の PATH を通してから attach(非対話シェルは .bashrc を読まないため)
   const inner = `export PATH=${path}:$PATH; tmux attach -t ${q(tmuxSession)}`;
   const cmd = `ssh ${q(h.host)} -t ${q(inner)}`;
-  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT);
+  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   return "ok";
 }
 
@@ -1311,7 +1424,9 @@ async function poll() {
   try {
     await updateRolloutCache();
     loadCodexNames();
-    const [cr, xr] = await Promise.all([claudeRunning(), codexRunning()]);
+    // claudeRunning() はキャッシュ読み出しのみ(取得は refreshClaudeRunning が別タイマーで行う)
+    const cr = claudeRunning();
+    const xr = await codexRunning();
     const running = [...cr, ...xr, ...remoteCacheList()];
     assignStableKeys(running);
     const runningSids = new Set(running.map(s => s.sid));
@@ -1329,7 +1444,12 @@ async function poll() {
     const sessions = [...running, ...recents]
       .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.ageS - b.ageS)
       // リモートは tty を持たず pollRemotes が s.screen を埋めているので温存する
-      .map(s => ({ ...s, screen: (s as RemoteSession).screen ?? screens.get(s.tty), summary: summariesMap.get(baseKey(s.key)) }));
+      .map(s => ({
+        ...s,
+        screen: (s as RemoteSession).screen ?? screens.get(s.tty),
+        summary: summariesMap.get(baseKey(s.key)),
+        stalled: s.tty && isTtyStalled(s.tty) ? true : undefined,
+      }));
     // キーはカードの同一性そのもの。重複すると選択が複数行に出るなど表示が壊れるため、
     // 最後に必ず一意化する(リモートは pid を持たず assignStableKeys の対象外)
     {
@@ -1710,6 +1830,13 @@ try {
 }
 
 console.log(`agd web: http://localhost:${PORT}`);
+
+// claude agents は遅いことがあるので poll() とは別タイマーで回す。
+// 実行中は refreshClaudeRunning 内のガードで次回起動を抑えるため、
+// 間隔より取得時間が長くても多重実行にはならない。
+refreshClaudeRunning();
+setInterval(refreshClaudeRunning, 5000);
+
 poll();
 
 // リモートは ssh の往復が読めないので独立したタイマーで回す
