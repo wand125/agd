@@ -115,7 +115,7 @@ describe("detectPrompt", () => {
       "❯ /compact",
       "  ⎿  Compacted (ctrl+o to see full summary)",
       "  ⎿  Read ../../../../.claude/RTK.md (30 lines)",
-      "  ⎿  Read data/hr/雇用保険_適正加入/社労士提出書類_整備リスト.md (94 lines)",
+      "  ⎿  Read docs/設計メモ/データ取り込み_仕様まとめ.md (94 lines)",
       "  ⎿  Referenced file tasks/index.md",
       "",
       "⏺ Remote Control disconnected — run /login to restore",
