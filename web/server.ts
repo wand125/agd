@@ -203,6 +203,10 @@ export type Session = {
   prompt?: PromptInfo;    // 画面から検出した選択プロンプト
   git?: GitInfo;
   stalled?: boolean;      // iTerm2 AppleScript がタイムアウトした tty は一時隔離する
+  // 手元の tmux ペイン位置("work:3.0" 形式)。ブラウザを別マシンで開いていると
+  // ジャンプが届かないため、代わりに attach コマンドを組み立てるのに使う。
+  // 上の remote.target と違い、これは母艦自身で動いている tmux を指す
+  tmuxTarget?: string;
   // ssh 越しの tmux ペイン。これがあるとキャプチャ・操作は remote 経由になる
   remote?: { host: string; paneId: string; target: string };
 };
@@ -528,10 +532,18 @@ on run argv
   return ""
 end run`;
 
+// tty → tmux ペイン位置("work:3.0")。captureScreens が毎サイクル tmuxPanes() を
+// 引くので、その結果をここに残して poll() から使い回す(list-panes を二度叩かないため)
+const tmuxTargetByTty = new Map<string, string>();
+
 async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   const panes = await tmuxPanes();
   const paneByTty = new Map(panes.map(p => [p.tty, p]));
+  tmuxTargetByTty.clear();
+  // target は "work:3.0" 形式のまま保持する。セッション名だけだと attach 後に
+  // 「最後に見ていたウィンドウ」が開いてしまい、目的のペインに着かない
+  for (const p of panes) if (p.target) tmuxTargetByTty.set(p.tty, p.target);
   const need = new Set(ttys.filter(Boolean));
   // tmux ペインは capture-pane で
   const tmuxTargets = [...need].filter(t => paneByTty.has(t));
@@ -1486,6 +1498,7 @@ async function poll() {
         screen: (s as RemoteSession).screen ?? screens.get(s.tty),
         summary: summariesMap.get(baseKey(s.key)),
         stalled: s.tty && isTtyStalled(s.tty) ? true : undefined,
+        tmuxTarget: s.tty ? tmuxTargetByTty.get(s.tty) : undefined,
       }));
     // キーはカードの同一性そのもの。重複すると選択が複数行に出るなど表示が壊れるため、
     // 最後に必ず一意化する(リモートは pid を持たず assignStableKeys の対象外)

@@ -823,9 +823,24 @@ async function jump(key) {
     if (!(r.result || "").startsWith("ok")) openAttach(r.needAttach ?? { host: s.remote.host, tmuxSession: (s.remote.target || "").split(":")[0] });
     return;
   }
+  // 別マシンから見ているときに focus を投げても、前面に出るのは母艦の画面で
+  // 手元には何も起きない。代わりに手元で貼れる attach コマンドを出す
+  if (!isLocalView()) {
+    openAttach({ host: sshHost(), tmuxTarget: s.tmuxTarget || "", copyOnly: true });
+    return;
+  }
   if (!s.tty) { toast(t("toast.ttyJumpUnknown")); return; }
   await api("/api/focus", { tty: s.tty });
 }
+// このブラウザが母艦上で動いているか。母艦なら focus が実際に画面へ届く。
+// 判定はサーバー側の IP では行えない(tailscale serve 経由だと外部からの
+// アクセスも 127.0.0.1 として届くため)。ブラウザ自身に尋ねるのが確実
+function isLocalView() {
+  return /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(location.hostname);
+}
+// attach 先のホスト名。ブラウザが今使っているホスト名がそのまま ssh 先になる
+// (Neo からは MagicDNS 名でアクセスしているため)。IP の場合もそのまま通る
+function sshHost() { return location.hostname; }
 // textarea の自動リサイズ(改行で上に伸びる)
 function autoGrow(ta, max) {
   ta.style.height = "auto";
@@ -856,21 +871,75 @@ async function sendTo(key, input) {
 
 // ---------------- リモート接続モーダル(f のジャンプ先が無いとき) ----------------
 let attachInfo = null;
+// info.copyOnly=true のときは母艦にタブを開かせず、attach コマンドを渡すだけにする。
+// ブラウザを別マシン(Neo など)で開いている場合、母艦の画面を前面に出しても
+// 手元には何も見えないため、手元で貼れるコマンドを出すのが唯一の届く手段になる
 function openAttach(info) {
   attachInfo = info;
-  $("attach-msg").innerHTML = t("attach.body", { host: esc(info.host) });
-  $("attach-cmd").textContent = `ssh ${info.host} -t 'tmux attach -t ${info.tmuxSession}'`;
+  $("attach-msg").innerHTML = info.copyOnly
+    ? t("attach.copyBody", { host: esc(info.host) })
+    : t("attach.body", { host: esc(info.host) });
+  $("attach-cmd").textContent = attachCmd(info);
+  // data-i18n-html ごと差し替える。innerHTML だけ書き換えると言語切替のたびに
+  // applyI18n が元のキーで上書きしてラベルがモードと食い違う
+  const go = $("attach-go");
+  go.dataset.i18nHtml = info.copyOnly ? "attach.copy" : "attach.open";
+  go.innerHTML = t(go.dataset.i18nHtml);
   $("attach-overlay").classList.add("show");
   $("attach-go").focus();
+}
+function attachCmd(info) {
+  // リモートホストのカードは従来どおりセッション名だけを持つ
+  if (info.tmuxSession) return `ssh ${info.host} -t 'tmux attach -t ${info.tmuxSession}'`;
+  // 母艦のカードは "work:3.0" 形式のペイン位置を持つ。attach だけだと最後に見ていた
+  // ウィンドウが開くので、目的の位置へ移してから attach する。
+  // select-window だけではウィンドウ内の active ペインが変わらない(実測)ため
+  // select-pane も必ず併せて送る
+  if (info.tmuxTarget) {
+    const sess = info.tmuxTarget.split(":")[0];
+    return `ssh ${info.host} -t 'tmux select-window -t ${info.tmuxTarget} \\; `
+      + `select-pane -t ${info.tmuxTarget} \\; attach -t ${sess}'`;
+  }
+  // tmux の外で動いているセッション。手元から辿る手段が無いので ssh だけ渡す
+  return `ssh ${info.host}`;
 }
 function closeAttach() { $("attach-overlay").classList.remove("show"); attachInfo = null; }
 async function runAttach() {
   if (!attachInfo) return;
   const info = attachInfo;
+  if (info.copyOnly) {
+    const cmd = attachCmd(info);
+    closeAttach();
+    toast(await copyText(cmd) ? t("attach.copied") : t("attach.copyFailed"));
+    return;
+  }
   closeAttach();
   const r = await api("/api/remote-attach", info);
   if ((r.result || "").startsWith("ok")) toast(t("attach.opened", { host: info.host }));
   else toast(t("toast.launchFailed", { err: r.error || r.result }));
+}
+// http:// では navigator.clipboard が使えない(セキュアコンテキスト限定)。
+// Neo からは素の http で開くのが普通なので、必ず textarea 方式へ落とす
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* 下のフォールバックへ */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    // 画面外に置くと iOS で選択できないため、見えない位置に実体を置く
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);   // iOS Safari は select() だけでは選ばれない
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch { return false; }
 }
 $("attach-go").onclick = runAttach;
 $("attach-overlay").onclick = (e) => { if (e.target === $("attach-overlay")) closeAttach(); };
