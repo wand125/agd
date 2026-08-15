@@ -1699,7 +1699,13 @@ try {
       // ssh のポートフォワード越しに見ていると location.hostname が localhost になり、
       // 手元に渡す attach コマンドが「自分自身に ssh する」壊れたものになる。
       // このホストの名前を渡して、フロント側でそれを ssh 先として使えるようにする
-      return Response.json({ ...config, pathStrip, readOnly: READONLY, sshHost: await sshHostName() });
+      // tmuxBin: attach コマンドに埋める tmux の絶対パス。ssh の非対話実行は
+      // /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin だけになるため、
+      // 素の "tmux" では command not found になる(実測)
+      return Response.json({
+        ...config, pathStrip, readOnly: READONLY,
+        sshHost: await sshHostName(), tmuxBin: tmuxBin(),
+      });
     }
     if (req.method === "POST" && url.pathname === "/api/key") {
       const { tty, key, keys, cardKey } = await req.json();

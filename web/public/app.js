@@ -158,6 +158,8 @@ fetch("/api/config").then(r => r.json()).then(c => {
   agd.pathStrip = c.pathStrip || "";
   // ポートフォワード越しに見ているとき、attach コマンドの ssh 先に使う
   window.agdSshHost = c.sshHost || "";
+  // ssh の非対話実行は PATH が細く素の "tmux" では届かないので絶対パスで呼ぶ
+  window.agdTmuxBin = c.tmuxBin || "tmux";
   render();
 });
 $("mac-notify-toggle").onchange = (e) => api("/api/config", { macNotify: e.target.checked });
@@ -847,7 +849,10 @@ async function jump(key) {
   // localhost:8787 を開いており、母艦のブラウザと見分けが付かないため。
   // 実際に focus を投げて結果を見るのが確実で、母艦に GUI が戻れば自動で元に戻る
   if (!(r.result || "").startsWith("ok"))
-    openAttach({ host: sshHost(), tmuxTarget: s.tmuxTarget || "", copyOnly: true });
+    openAttach({
+      host: sshHost(), tmuxTarget: s.tmuxTarget || "",
+      tmuxBin: window.agdTmuxBin || "tmux", copyOnly: true,
+    });
 }
 // attach 先のホスト名。ポートフォワード越しだと localhost になってしまうので、
 // その場合はサーバーが自分のホスト名を教えてくれるまで m4 を既定にする
@@ -919,7 +924,10 @@ function attachCmd(info) {
   // select-pane も必ず併せて送る
   if (info.tmuxTarget) {
     const sess = info.tmuxTarget.split(":")[0];
-    return `ssh ${info.host} -t 'tmux select-window -t ${info.tmuxTarget} \\; `
+    // ssh の非対話実行は /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin
+    // だけになる。素の "tmux" では command not found になるので絶対パスで呼ぶ(実測)
+    const tm = info.tmuxBin || "tmux";
+    return `ssh ${info.host} -t '${tm} select-window -t ${info.tmuxTarget} \\; `
       + `select-pane -t ${info.tmuxTarget} \\; attach -t ${sess}'`;
   }
   // tmux の外で動いているセッション。手元から辿る手段が無いので ssh だけ渡す

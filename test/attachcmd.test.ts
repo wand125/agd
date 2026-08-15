@@ -36,6 +36,19 @@ describe("attach コマンドの組み立て", () => {
     expect(cmd).not.toContain("attach -t work:3.0");
   });
 
+  test("tmux は絶対パスで呼ぶ(非対話 ssh は PATH が細い)", () => {
+    // ssh の非対話実行は /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin
+    // だけになる。素の "tmux" だと command not found で終わる(Neo で実測)
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "work:3.0", tmuxBin: "/opt/homebrew/bin/tmux" });
+    expect(cmd).toContain("'/opt/homebrew/bin/tmux select-window");
+    expect(cmd).not.toContain("'tmux select-window");
+  });
+
+  test("tmux の場所が分からなければ素の tmux に落とす", () => {
+    // PATH が通っている環境なら動く。undefined を埋め込むよりまし
+    expect(attachCmd({ host: "m4", tmuxTarget: "work:3.0" })).toContain("'tmux select-window");
+  });
+
   test("tmux のコマンド区切りはリモートシェルに \\; として届く", () => {
     // ssh 経由ではシングルクォート内に入るため、素の ";" だとリモートシェルが
     // コマンド区切りとして食べてしまい tmux まで届かない
