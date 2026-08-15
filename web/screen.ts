@@ -39,7 +39,13 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
     .replace(/\x00/g, " ");
   // カーソル記号は claude の ❯(U+276F)と codex の ›(U+203A)の両方を受け付ける
-  const lines = plain.split("\n").slice(-18).map(l => l.replace(/[│┃]/g, " ").trimEnd());
+  // 横に並んだ別パネル(ノート欄など)が同じ行に混ざる。│ を空白に潰すだけだと
+  // 右側のパネルの文章がそのまま選択肢ラベルに流れ込むため、最初の縦罫線より
+  // 右は切り捨てる。ただし行頭の枠線は本文の左端なので対象外
+  const lines = plain.split("\n").slice(-18).map(l => {
+    const cut = l.replace(/^\s*[│┃]/, m => " ".repeat(m.length)).search(/[│┃╭╮╰╯┌┐└┘]/);
+    return (cut > 0 ? l.slice(0, cut) : l).replace(/[│┃]/g, " ").trimEnd();
+  });
   const optRe = /^\s*([❯›])?\s*(\d+)\.\s+(.+)$/;
   const opts: { key: string; label: string }[] = [];
   let hasCursor = false, firstIdx = -1, numCursorIdx = 0;
@@ -66,8 +72,16 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
   // これまでは {options: []} になり、UI に何も出せなかった
   const form = detectForm(lines);
   if (form) return form;
-  // 非番号のカーソル選択(❯ Yes 形式)。空の入力プロンプト(❯ のみ)は除外
-  const cursorIdx = lines.findIndex(l => /^\s*[❯›]\s+\S/.test(l) && !optRe.test(l));
+  // 非番号のカーソル選択(❯ Yes 形式)。空の入力プロンプト(❯ のみ)は除外。
+  //
+  // ただし入力欄(──── で挟まれた ❯)より上は「過去に打ったコマンドのエコー」で、
+  // 生きたカーソルではない。ここを拾うと idle のセッションで
+  // 「❯ /compact」+ 直後の ⎿ 結果行が選択肢に化ける(実際に誤検出していた)。
+  // 入力欄の位置が分かる場合はそれより下だけを見る
+  const inputAt = lines.findIndex(l => /^[─━]{20,}$/.test(l.trim()));
+  const searchFrom = inputAt >= 0 ? inputAt : 0;
+  const cursorIdx = lines.findIndex((l, i) =>
+    i >= searchFrom && /^\s*[❯›]\s+\S/.test(l) && !optRe.test(l));
   if (cursorIdx >= 0) {
     // カーソル行の上下に連続する「選択肢らしい行」をブロックとして解析
     const isOpt = (l: string | undefined) => {
@@ -75,6 +89,8 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
       return t.length > 0 && t.length <= 80 &&
         !/[??]$/.test(t) &&                       // 質問文
         !/[┌┐└┘─╭╮╰╯═━]/.test(t) &&               // 罫線
+        !/^[⎿⏺✻·]/.test(t) &&                     // ツール結果・状態行(選択肢ではない)
+        !/^\//.test(t) &&                         // 打ち込んだスラッシュコマンドのエコー
         !/ · |^Esc |^Press |^ctrl|^Tab /i.test(t); // 操作ヒント行
     };
     let start = cursorIdx, end = cursorIdx;

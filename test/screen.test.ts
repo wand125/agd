@@ -105,6 +105,55 @@ describe("detectPrompt", () => {
     expect(detectPrompt(`${old}\n${filler}`)).toBeNull();
   });
 
+  // idle のセッションで、過去に打ったコマンドのエコー(❯ /compact)と
+  // その下の ⎿ 結果行を選択肢として拾ってしまい、待機していないのに
+  // 応答ボタンが出ていた(実際の画面から採取)
+  describe("スクロールバックの誤検出", () => {
+    const idleScreen = [
+      "✻ Churned for 40s",
+      "",
+      "❯ /compact",
+      "  ⎿  Compacted (ctrl+o to see full summary)",
+      "  ⎿  Read ../../../../.claude/RTK.md (30 lines)",
+      "  ⎿  Read data/hr/雇用保険_適正加入/社労士提出書類_整備リスト.md (94 lines)",
+      "  ⎿  Referenced file tasks/index.md",
+      "",
+      "⏺ Remote Control disconnected — run /login to restore",
+      "",
+      "─".repeat(60),
+      "❯ ",
+      "─".repeat(60),
+      "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+    ].join("\n");
+
+    test("入力欄より上のコマンドエコーを選択肢にしない", () => {
+      expect(detectPrompt(idleScreen)?.options ?? []).toEqual([]);
+    });
+
+    test("ツール結果行(⎿)は選択肢にならない", () => {
+      const p = detectPrompt(idleScreen);
+      const labels = (p?.options ?? []).map(o => o.label);
+      expect(labels.some(l => l.includes("Read ") || l.includes("Compacted"))).toBe(false);
+    });
+  });
+
+  // 横に並んだ別パネルの文章が同じ行に入り、選択肢ラベルに流れ込んでいた
+  test("右側の別パネルの文字をラベルに混ぜない", () => {
+    const screen = [
+      "どちらで進めますか?",
+      " ❯ 1. エクスポーターを新規作成    │ （パスをご指定ください）",
+      "   2. ページング機能を追加        │ 探した場所:",
+      "   3. 既存の場所を教える          │ ~/.discord-mcp/",
+    ].join("\n");
+    const p = detectPrompt(screen);
+    expect(p?.kind).toBe("numbered");
+    expect(p?.options.map(o => o.label)).toEqual([
+      "エクスポーターを新規作成",
+      "ページング機能を追加",
+      "既存の場所を教える",
+    ]);
+  });
+
   // auto mode のセットアップ画面。番号でもカーソル選択でもないため、以前は
   // {options: []} になって UI から一切操作できなかった
   describe("設定フォーム", () => {
