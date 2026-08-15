@@ -95,16 +95,17 @@
   body.split-detail.no-selection #split-empty { display: flex; }
   /* 並列時は左ペインが狭く1行に収まらないため、要約を2行目へ送る。
      リストタブは横に長いので既定どおり1行のまま */
+  /* 並列ビュー(左ペイン 560px ≒ 75桁)は1行に収まらないため3段にする。
+     実測では 名前+AIタイトル+パス+状態 で最大146桁あり、特に長いのは
+     AIタイトル(最大40桁)とパス(最大53桁)なので、この2つを2行目へ送る */
   #views.split .row-main { display: flex; flex-direction: column; gap: 1px; align-items: stretch; }
-  #views.split .row-line2 { display: flex; }
-  /* 要約は 560px の左ペインに1行では収まらない(実測で約8割が溢れる)ので、
-     省略記号で切らずに2行まで折り返す。3行以上は行が高くなりすぎて
-     一覧としての俯瞰性を損なうため -webkit-line-clamp で頭打ちにする */
-  #views.split .row-summary {
-    white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; text-overflow: clip;
-    line-height: 1.35; word-break: break-word;
-  }
+  #views.split .row-line1,
+  #views.split .row-line2,
+  #views.split .row-line3 { flex: none; }
+  /* 2行目のAIタイトルとパスは、溢れたら省略記号で切る(折り返すと行が伸びる) */
+  #views.split .card-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 1行目の名前は幅いっぱいまで使ってよい(状態は右端に固定) */
+  #views.split .row-line1 .card-title { flex: 1 1 auto; }
   /* 画面一覧タブ(固定高・ページネーション) */
   #grid-view { flex: 1; min-height: 0; padding: 10px 32px; position: relative; }
   #views.split #grid-view { padding: 10px 26px; }
@@ -185,14 +186,19 @@
   .resume-row.pinned .row-pin svg path:first-child { fill: currentColor; }
   /* 2行構成。1行目=識別情報 / 2行目=要約。行を分けたことで名前の幅制限(旧 32%)が
      不要になり、長いセッション名もそのまま読める */
-  /* 既定は1行(リストタブは横幅が広く収まる)。1行目と2行目を横に並べ、
-     要約が1行目の続きに見えるようにする。並列ビューだけ縦積みに切り替える */
+  /* 既定は1行(リストタブは横幅が広く収まる)。3つの段を横一列に並べる。
+     並列ビューだけ縦積みに切り替える */
   .row-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; }
   .row-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
-  .row-line2 { display: flex; min-width: 0; flex: 1 1 0; }
+  .row-line2 { display: flex; min-width: 0; flex: 0 1 auto; }
+  .row-line3 { display: flex; min-width: 0; flex: 1 1 0; }
+  .card-status { color: var(--dim); font-size: 10.5px; white-space: nowrap; flex: none; }
+  .row-cwd { color: var(--dim); }
   .resume-row .card-title { font-weight: 400; font-size: 12.5px; cursor: pointer; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-row .btn { padding: 1px 8px; font-size: 11px; }
-  .resume-row .card-meta { font-size: 10.5px; }
+  /* 行内の card-meta は AIタイトル+パスを載せるため、はみ出す前に縮んでよい
+     (グリッドや詳細ヘッダの card-meta は従来どおり flex:none のまま) */
+  .resume-row .card-meta { font-size: 10.5px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .row-btns { margin-left: auto; flex: none; display: flex; gap: 4px; white-space: nowrap; }
   /* オーバーレイ */
   .overlay { position: fixed; inset: 0; background: rgba(1,4,9,.8); display: none; z-index: 10; }

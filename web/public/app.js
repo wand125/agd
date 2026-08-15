@@ -663,9 +663,11 @@ function buildRow(s, running) {
   row.className = "resume-row" + (closing.has(s.key) ? " closing" : "")
     + (pinned.includes(s.key) ? " pinned" : "");
   row.dataset.key = s.key;
-  // 既定は1行(リストタブは横幅が広い)。並列ビューでは左ペインが狭いため
-  // CSS 側で .row-main を縦積みにし、要約だけが2行目へ落ちる。
-  // card-meta は行末に置きたいので .row-main の外に出している
+  // 既定は1行(リストタブは横幅が広い)。並列ビュー(左ペイン 560px)では
+  // CSS 側で .row-main を縦積みにして3段になる:
+  //   1行目 = 識別(エージェント・プロジェクト・名前・状態)
+  //   2行目 = AIタイトルとパス … 実測でここが最も長く、1行目に載せると溢れる
+  //   3行目 = 要約(1行に収める)
   row.innerHTML = `
     <button class="row-pin" data-i18n-title="card.pin" title="Pin">
       <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></svg>
@@ -677,21 +679,27 @@ function buildRow(s, running) {
         <span class="proj-tag" style="background:${projColor(s.cwd)}">${esc(projName(s.cwd))}</span>
         <span class="card-title"></span>
         <span class="git-badge">${running ? gitBadge(s.git) : ""}</span>
+        <span class="card-status"></span>
       </div>
-      <div class="row-line2"><span class="row-summary"></span></div>
-    </div>
-    <span class="card-meta"></span>`;
+      <div class="row-line2"><span class="card-meta"></span></div>
+      <div class="row-line3"><span class="row-summary"></span></div>
+    </div>`;
   row.querySelector(".dot").style.background = `var(--${s.status})`;
   row.querySelector(".row-pin").onclick = (e) => { e.stopPropagation(); togglePin(s.key); };
-  row.querySelector(".card-title").innerHTML =
-    esc(maskText(s.name)) + (s.title ? ` <span class="ai-title">${esc(maskText(s.title))}</span>` : "");
+  // 名前だけを1行目に置く。AIタイトルは長い(実測40桁)ので2行目へ回す
+  row.querySelector(".card-title").textContent = maskText(s.name);
+  row.querySelector(".card-status").textContent = `${t(`status.${s.status}`)} · ${fmtAge(s.ageS)}`;
+  // 2行目: AIタイトル + パス。どちらも長くなりうるのでまとめてここに置く
+  const meta = row.querySelector(".card-meta");
+  const title = s.title ? maskText(s.title) : "";
+  meta.innerHTML = (title ? `<span class="ai-title">${esc(title)}</span> ` : "")
+    + `<span class="row-cwd">${esc(shortCwd(s.cwd))}</span>`;
+  meta.title = `${title ? title + " · " : ""}${s.cwd}`;
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
-  // 要約が無いセッションは2行目ごと畳んで、従来どおりの1行の高さに保つ。
-  // CSS の :empty は親要素(.row-line2)には効かないためここで消す
-  row.querySelector(".row-line2").style.display = s.summary ? "" : "none";
-  row.querySelector(".card-meta").textContent = `${shortCwd(s.cwd)} · ${t(`status.${s.status}`)} · ${fmtAge(s.ageS)}`;
+  // 要約が無いセッションは3行目ごと畳む。CSS の :empty は親要素に効かない
+  row.querySelector(".row-line3").style.display = s.summary ? "" : "none";
   const btns = document.createElement('span');
   btns.className = "row-btns";
   if (running) {
