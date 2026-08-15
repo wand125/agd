@@ -652,8 +652,13 @@ let resumeBusy = false;
 async function resumeSession(s) {
   if (!s || resumeBusy) return;
   resumeBusy = true;
-  await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
-  resumeBusy = false;
+  // 例外で抜けるとフラグが立ちっぱなしになり、以後の再開が全て無視される
+  try {
+    await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
+  } catch (e) {
+    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    return;
+  } finally { resumeBusy = false; }
   toast(t("toast.resumed", { agent: s.agent }));
 }
 
@@ -833,8 +838,16 @@ async function sendTo(key, input) {
   input.dataset.busy = "1";
   input.value = "";                          // 先にクリアして二重送信を防止
   autoGrow(input, 140);
-  const r = await api("/api/send", { ...target(s), text });
-  delete input.dataset.busy;
+  // 例外時もフラグを戻す。ここは再描画で要素ごと作り直されるため詰まりは自然に
+  // 解けるが、握り潰すと入力内容が消えたまま何も知らせないことになる
+  let r;
+  try {
+    r = await api("/api/send", { ...target(s), text });
+  } catch (e) {
+    input.value = text; autoGrow(input, 140);
+    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    return;
+  } finally { delete input.dataset.busy; }
   if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
   else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err: r.result })); }  // 失敗時は復元
 }
@@ -1347,8 +1360,17 @@ async function sendDetail() {
   detailSendBusy = true;
   $("d-input").value = "";                   // 先にクリアして二重送信を防止
   autoGrow($("d-input"), 200);
-  const r = await api("/api/send", { ...target(s), text });
-  detailSendBusy = false;
+  // api() はタイムアウト/通信断で例外を投げる。detailSendBusy はモジュール変数で
+  // 一覧の dataset.busy と違い再描画で消えないため、finally で戻さないと
+  // 以後の送信が永久に上の早期 return に吸われて「詳細から送れない」状態になる
+  let r;
+  try {
+    r = await api("/api/send", { ...target(s), text });
+  } catch (e) {
+    $("d-input").value = text; autoGrow($("d-input"), 200);
+    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    return;
+  } finally { detailSendBusy = false; }
   if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
   else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err: r.result })); }
 }
@@ -1489,8 +1511,14 @@ function renderNewList() {
 async function launchNew(agent, cwd, create = false) {
   if (!cwd || newLaunchBusy) return;
   newLaunchBusy = true;
-  const r = await api("/api/new", { agent, cwd, create });
-  newLaunchBusy = false;
+  // 例外で抜けるとフラグが立ちっぱなしになり、以後の起動が全て無視される
+  let r;
+  try {
+    r = await api("/api/new", { agent, cwd, create });
+  } catch (e) {
+    toast(t("toast.launchFailed", { err: String(e?.message ?? e) }));
+    return;
+  } finally { newLaunchBusy = false; }
   if (r.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent, cwd,
