@@ -13,6 +13,11 @@
     --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #c9d1d9; --dim: #8b949e;
     --busy: #e3b341; --waiting: #f85149; --idle: #3fb950; --resumable: #6e7681;
     --accent: #58a6ff; --user: #1f6feb;
+    /* セッション行の3段は情報の役割が違うので明度と色味で描き分ける。
+       全部 --dim にしていた頃は3行が同じ灰色で溶けて読み分けられなかった。
+       パス=最も暗い(場所の手がかり) / AIタイトル=青寄り(何の話か) /
+       要約=やや明るい灰(いま何が起きているか。ここが一番読まれる) */
+    --path: #8b949e; --ai-title: #79a8d8; --summary: #c2ccd6;
     /* 並列ビューの左ペイン(セッション一覧)の幅 */
     --split-left: 560px;
   }
@@ -191,8 +196,13 @@
   .row-line2 { display: flex; min-width: 0; flex: 0 1 auto; }
   .row-line3 { display: flex; min-width: 0; flex: 1 1 0; }
   .card-status { color: var(--dim); font-size: 10.5px; white-space: nowrap; flex: none; }
-  .row-cwd { color: var(--dim); }
-  .resume-row .card-title { font-weight: 400; font-size: 12.5px; cursor: pointer; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* --- セッション行の色分け(グリッドのカードや詳細ヘッダには影響させない) --- */
+  .row-cwd { color: var(--path); }
+  /* AIタイトルは青寄りにしてパスと視覚的に切り離す(同じ行に並ぶため) */
+  .resume-row .ai-title { color: var(--ai-title); }
+  .resume-row .row-summary { color: var(--summary); }
+  /* 名前は行の主役なので一番明るく・やや太く(前は 400 で要約と区別しにくかった) */
+  .resume-row .card-title { color: var(--fg); font-weight: 500; font-size: 12.5px; cursor: pointer; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .resume-row .btn { padding: 1px 8px; font-size: 11px; }
   /* 行内の card-meta は AIタイトル+パスを載せるため、はみ出す前に縮んでよい
      (グリッドや詳細ヘッダの card-meta は従来どおり flex:none のまま) */
