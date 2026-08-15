@@ -25,7 +25,13 @@ function fmtAge(s) {
 }
 function shortCwd(c) {
   let s = c || "";
-  if (agd.pathStrip && s.startsWith(agd.pathStrip)) s = "…" + s.slice(agd.pathStrip.length);
+  if (agd.pathStrip && s.startsWith(agd.pathStrip)) {
+    const rest = s.slice(agd.pathStrip.length);
+    // 共通プレフィックスちょうどのディレクトリだと rest が空になり、表示が
+    // 「…」の1文字だけになってどのセッションか分からなくなる。
+    // その場合は末尾のディレクトリ名を残す(…/0_Group)
+    s = rest ? "…" + rest : "…/" + (agd.pathStrip.split("/").filter(Boolean).pop() ?? "");
+  }
   return maskText(s.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~"));
 }
 // 本文用。< と & だけ潰せば要素の外には出られない

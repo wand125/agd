@@ -195,6 +195,9 @@
   .row-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
   .row-line2 { display: flex; min-width: 0; flex: 0 1 auto; }
   .row-line3 { display: flex; min-width: 0; flex: 1 1 0; }
+  /* ボタンは .resume-row 直下(行の右端)と1行目の中を、表示モードで
+     行き来する(buildRow / placeRowBtns 参照)。行直下にあるときは
+     margin-left:auto で右端まで押し出される */
   .card-status { color: var(--dim); font-size: 10.5px; white-space: nowrap; flex: none; }
   /* --- セッション行の色分け(グリッドのカードや詳細ヘッダには影響させない) --- */
   .row-cwd { color: var(--path); }
@@ -207,7 +210,7 @@
   /* 行内の card-meta は AIタイトル+パスを載せるため、はみ出す前に縮んでよい
      (グリッドや詳細ヘッダの card-meta は従来どおり flex:none のまま) */
   .resume-row .card-meta { font-size: 10.5px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .row-btns { margin-left: auto; flex: none; display: flex; gap: 4px; white-space: nowrap; }
+  .row-btns { margin-left: auto; flex: none; display: flex; gap: 4px; white-space: nowrap; align-items: center; }
   /* オーバーレイ */
   .overlay { position: fixed; inset: 0; background: rgba(1,4,9,.8); display: none; z-index: 10; }
   .overlay.show { display: flex; }

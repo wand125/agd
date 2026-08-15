@@ -658,6 +658,18 @@ async function resumeSession(s) {
   toast(t("toast.resumed", { agent: s.agent }));
 }
 
+// ボタンの置き場所は表示モードで変わる。
+//   1行表示  → 行(.resume-row)の直下。margin-left:auto で右端に寄る
+//   並列(3段) → 1行目の中。行直下に置くと3段ぶんの高さを占め、その左幅だけ
+//               2行目(パス+タイトル)と3行目(要約)が狭くなってしまう
+// ボタンの幅は実行中(ログ+⌖)と再開可能(ログ+resume)で違うため、余白を
+// 決め打ちにする方法は取らない
+function placeRowBtns(row, btns) {
+  const btn = btns ?? row.querySelector(".row-btns");
+  if (!btn) return;
+  (activeTab === "split" ? row.querySelector(".row-line1") : row).appendChild(btn);
+}
+
 function buildRow(s, running) {
   const row = document.createElement('div');
   row.className = "resume-row" + (closing.has(s.key) ? " closing" : "")
@@ -713,9 +725,7 @@ function buildRow(s, running) {
     logBtn.onclick = () => openDetail(s.key);
     resumeBtn.onclick = () => resumeSession(s);
   }
-  // ボタンは1行目に入れる。行全体の右に置くと3段ぶんの高さを占め、
-  // その左幅ぶんだけ2行目(パス+タイトル)と3行目(要約)が使えなくなる
-  row.querySelector(".row-line1").appendChild(btns);
+  placeRowBtns(row, btns);
   // 行のどこを押しても選べるようにする。タイトルだけだと、要約やパスの上を
   // クリックしても反応せず「切り替わらない」ように見えていた
   row.onclick = (e) => {
