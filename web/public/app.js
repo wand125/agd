@@ -704,13 +704,18 @@ function buildRow(s, running) {
   // 2行目: パス + AIタイトル。どちらも長くなりうるのでまとめてここに置く
   const meta = row.querySelector(".card-meta");
   const title = s.title ? maskText(s.title) : "";
-  meta.innerHTML = `<span class="row-cwd">${esc(shortCwd(s.cwd))}</span>`
-    + (title ? ` <span class="ai-title">${esc(title)}</span>` : "");
+  // パスは親までにする。末尾のディレクトリ名は左のチップが既に出しており、
+  // 全部載せると同じ語が1行に2回並ぶ
+  const par = parentCwd(s.cwd);
+  meta.innerHTML = (par ? `<span class="row-cwd">${esc(par)}</span>` : "")
+    + (title ? `${par ? " " : ""}<span class="ai-title">${esc(title)}</span>` : "");
   meta.title = `${s.cwd}${title ? " · " + title : ""}`;
   const sum = row.querySelector(".row-summary");
   sum.textContent = s.summary ? maskText(s.summary) : "";
   sum.title = s.summary ? maskText(s.summary) : "";
-  // 要約が無いセッションは3行目ごと畳む。CSS の :empty は親要素に効かない
+  // 中身が無い段は畳む(CSS の :empty は親要素に効かないためここで消す)。
+  // 2行目はパスも AIタイトルも無い場合に空になりうる
+  row.querySelector(".row-line2").style.display = (par || title) ? "" : "none";
   row.querySelector(".row-line3").style.display = s.summary ? "" : "none";
   const btns = document.createElement('span');
   btns.className = "row-btns";

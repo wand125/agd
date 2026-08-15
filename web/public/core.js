@@ -48,6 +48,16 @@ function projName(cwd) {
   const parts = (cwd || "").split("/").filter(Boolean);
   return maskText(parts[parts.length - 1] || cwd);
 }
+// 末尾のディレクトリ名を除いたパス。セッション行では末尾を projName の
+// チップで既に出しているため、そのまま shortCwd を並べると同じ語が2回出る
+// (実データで8件中7件が重複していた)。親までを出せば「どこにあるか」だけを
+// 足せる。親が無い場合は空文字を返す(呼び出し側で出し分ける)
+function parentCwd(cwd) {
+  const s = shortCwd(cwd);
+  const name = projName(cwd);
+  if (s === name) return "";
+  return s.endsWith("/" + name) ? s.slice(0, -(name.length + 1)) : s;
+}
 function projColor(cwd) {
   let h = 0;
   const name = projName(cwd);

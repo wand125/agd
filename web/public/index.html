@@ -193,8 +193,11 @@
      並列ビューだけ縦積みに切り替える */
   .row-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; }
   .row-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
-  .row-line2 { display: flex; min-width: 0; flex: 0 1 auto; }
-  .row-line3 { display: flex; min-width: 0; flex: 1 1 0; }
+  /* 1行表示では2行目(パス+AIタイトル)と3行目(要約)が横に並んで幅を奪い合う。
+     どちらも min-width:0 + shrink 可にしておかないと、中身の幅のまま居座って
+     隣のタグやボタンに重なってしまう。要約より先にパス側を削る */
+  .row-line2 { display: flex; min-width: 0; flex: 1 1 auto; overflow: hidden; }
+  .row-line3 { display: flex; min-width: 0; flex: 1 1 0; overflow: hidden; }
   /* ボタンは .resume-row 直下(行の右端)と1行目の中を、表示モードで
      行き来する(buildRow / placeRowBtns 参照)。行直下にあるときは
      margin-left:auto で右端まで押し出される */
