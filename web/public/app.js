@@ -735,6 +735,9 @@ function renderPromptBar(bar, s) {
       // description はトランスクリプト由来のときだけ付く(画面には収まらない補足)
       `<button class="btn ${i === (p.cursorIndex ?? -1) ? "cursor-on" : ""}" data-mode="num" data-key="${escAttr(o.key)}" data-index="${i}" title="${escAttr(maskText(o.label + (o.description ? "\n" + o.description : "")))}">${esc(o.key)}. ${esc(maskText(o.label.slice(0, 24)))}</button>`
     ).join("");
+    // 複数選択では数字キーはチェックの ON/OFF でしかなく、確定は別に Enter が要る。
+    // 確定ボタンが無いと、チェックは付けられるのに送信できない状態になる
+    if (p.multiSelect) html += `<button class="btn primary" data-mode="key" data-key="Enter">${t("prompt.confirm")}</button>`;
   } else if (opts.length && p.kind === "cursor") {
     // カーソル選択: クリックで ↑/↓×n → Enter を送る
     html += opts.map((o, i) =>
@@ -753,17 +756,26 @@ function renderPromptBar(bar, s) {
   bar.querySelectorAll("button").forEach(b => {
     b.onclick = async (e) => {
       e.stopPropagation();
+      // 複数選択では同じボタンを何度も押す(チェックの ON/OFF、他項目の追加)。
+      // 押しっぱなしで disabled にすると二度と押せず、確定もできなくなる。
+      // 二重送信は「送信中だけ」塞げばよい
+      if (b.disabled) return;
       b.disabled = true;
       let r;
-      const cursorStyle = b.dataset.mode === "cursor" ||
-        (b.dataset.mode === "num" && s.agent === "codex");  // codexの番号付きはカーソル移動で選ぶ
-      if (cursorStyle) {
-        const delta = Number(b.dataset.index) - (p.cursorIndex ?? 0);
-        const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-        r = await api("/api/key", { ...target(s), keys });
-      } else {
-        r = await api("/api/key", { ...target(s), key: b.dataset.key });
-      }
+      try {
+        const cursorStyle = b.dataset.mode === "cursor" ||
+          (b.dataset.mode === "num" && s.agent === "codex");  // codexの番号付きはカーソル移動で選ぶ
+        if (cursorStyle) {
+          const delta = Number(b.dataset.index) - (p.cursorIndex ?? 0);
+          const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
+          r = await api("/api/key", { ...target(s), keys });
+        } else {
+          r = await api("/api/key", { ...target(s), key: b.dataset.key });
+        }
+      } catch (err) {
+        toast(t("toast.sendFailed", { err: String(err?.message ?? err) }));
+        return;
+      } finally { b.disabled = false; }
       if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
       else toast(t("toast.sendFailed", { err: r.result }));
     };

@@ -131,6 +131,8 @@
   .abtn { font-size: 12.5px; padding: 6px 12px; border-radius: 8px; background: #21262d;
           border: 1px solid rgba(248,81,73,.5); color: var(--fg); }
   .abtn:active { background: var(--accent); color: #0d1117; }
+  /* 複数選択の確定。チェック用のボタンと役割が違うので見た目で分ける */
+  .abtn.confirm { border-color: var(--accent); background: rgba(31,111,235,.3); font-weight: 600; }
 
   /* ---- 詳細: 全画面。画面キャプチャと会話ログをタブで切替 ---- */
   /* 詳細は右からスライドイン。display の切替では transition が効かないので、

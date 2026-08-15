@@ -81,7 +81,9 @@ function renderList() {
     // 入力待ちは一覧から直接答えられるようにする(詳細を開かせない)
     const answers = !readOnly && s.status === "waiting" && s.prompt?.options?.length
       ? `<div class="answers">${s.prompt.options.slice(0, 4).map((o, i) =>
-          `<button class="abtn" data-k="${escAttr(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}</div>`
+          `<button class="abtn" data-k="${escAttr(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}${
+          // 複数選択は数字がチェックの ON/OFF なので、確定用の Enter が別に要る
+          s.prompt.multiSelect ? `<button class="abtn confirm" data-k="${escAttr(s.key)}" data-a="enter">${esc(t("prompt.confirm"))}</button>` : ""}</div>`
       : "";
     const isPinned = pinned.includes(s.key);
     return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${escAttr(s.key)}"
@@ -120,9 +122,15 @@ async function answer(s, n) {
   if (answering) return;
   answering = true;
   try {
-    const r = await answerPrompt(s, Number(n));
+    // 複数選択の確定(Enter)。数字はチェックの ON/OFF でしかない
+    const isConfirm = n === "enter";
+    const multi = !!s.prompt?.multiSelect;
+    const r = isConfirm ? await sendKey(s, "Enter") : await answerPrompt(s, Number(n));
     if (!r) { toast(t("m.answerFailed")); return; }
     toast(t("m.sent"));
+    // 複数選択はチェックを重ねてから確定するので、確定するまで畳んではいけない。
+    // 畳むと2つ目以降にチェックを付けられなくなる
+    if (multi && !isConfirm) return;
     // 送信済みのプロンプトは即座に畳む。次のポーリングまで残っていると
     // 同じ選択肢をもう一度押せてしまう
     delete s.prompt;
@@ -347,7 +355,9 @@ function paintDetail(s, force = false) {
     $("dprompt").classList.add("on");
     $("dpq").textContent = maskText(p.question ?? "");
     $("dpa").innerHTML = p.options.map((o, i) =>
-      `<button class="abtn" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 30)}</button>`).join("");
+      `<button class="abtn" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 30)}</button>`).join("")
+      // 複数選択は数字がチェックの ON/OFF なので、確定用の Enter が別に要る
+      + (p.multiSelect ? `<button class="abtn confirm" data-a="enter">${esc(t("prompt.confirm"))}</button>` : "");
   } else $("dprompt").classList.remove("on");
 }
 $("dpa").onclick = (e) => {

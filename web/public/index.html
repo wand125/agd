@@ -146,6 +146,8 @@
   .prompt-q { width: 100%; font-size: 12px; color: var(--waiting); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prompt-bar .btn { border-color: rgba(248,81,73,.5); }
   .prompt-bar .btn.cursor-on { border-color: var(--accent); color: var(--accent); }
+  /* 複数選択の確定。チェック用の数字ボタンと役割が違うので見た目で分ける */
+  .prompt-bar .btn.primary { border-color: var(--accent); background: rgba(31,111,235,.25); color: var(--fg); font-weight: 600; }
   .screen-wrap { position: relative; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border); }
   .screen { font-family: "SF Mono", Menlo, monospace; font-size: 11px; line-height: 1.45; background: #010409; color: #b0bac4; padding: 8px 10px; flex: 1; overflow-y: auto; white-space: pre-wrap; word-break: break-all; min-height: 0; }
   .latest-btn { position: absolute; right: 14px; bottom: 10px; display: none; background: rgba(33,38,45,.95); color: var(--accent); border: 1px solid var(--accent); border-radius: 14px; padding: 3px 12px; font-size: 12px; cursor: pointer; z-index: 2; }
