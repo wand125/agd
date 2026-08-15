@@ -693,7 +693,9 @@ on run argv
   return "not found"
 end run`;
 
-const NAMED_KEYS = new Set(["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab"]);
+// Space は設定フォームのチェックボックス切り替えに要る。名前付きで扱わないと
+// send-keys -l で "Space" という文字列がそのまま打ち込まれる
+const NAMED_KEYS = new Set(["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab", "Space"]);
 const CSI_MAP: Record<string, string> = { Up: "A", Down: "B", Right: "C", Left: "D", ShiftTab: "Z" };
 
 async function sendKeyToTty(tty: string, key: string): Promise<string> {
@@ -711,6 +713,7 @@ async function sendKeyToTty(tty: string, key: string): Promise<string> {
   if (key === "Enter") kind = "enter";
   else if (key === "Escape") kind = "escape";
   else if (key === "Tab") kind = "tab";
+  else if (key === "Space") payload = " ";   // text として空白1文字を打つ
   else if (CSI_MAP[key]) { kind = "csi"; payload = CSI_MAP[key]; }
   if (isTtyStalled(tty)) return "error: timeout";
   const r = await shStrict(["osascript", "-", `/dev/${tty}`, kind, payload], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);

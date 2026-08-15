@@ -767,8 +767,17 @@ function renderPromptBar(bar, s) {
 // n番目の選択肢まで ↑/↓ を送って Enter で確定(カーソル移動方式)
 function answerByCursor(s, n) {
   const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
-  const keys = [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"];
-  api("/api/key", { ...target(s), keys }).then(() => toast(t("toast.optionConfirmed", { n })));
+  const move = Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up");
+  // フォームは行ごとに操作が違う(詳細は core.js の answerPrompt と同じ理由)。
+  // Enter を一律に送ると、チェックを切り替えたつもりで確定してしまう
+  if (s.prompt.kind === "form") {
+    const label = s.prompt.options[n - 1]?.label ?? "";
+    const last = /(◀|▶)/.test(label) ? "Right" : /\[[ xX✔✓*]\]/.test(label) ? "Space" : "Enter";
+    api("/api/key", { ...target(s), keys: [...move, last] })
+      .then(() => toast(t(last === "Enter" ? "toast.optionConfirmed" : "toast.optionToggled", { n })));
+    return;
+  }
+  api("/api/key", { ...target(s), keys: [...move, "Enter"] }).then(() => toast(t("toast.optionConfirmed", { n })));
 }
 function answerPromptByNumber(sessKey, n) {
   const s = sessionOf(sessKey);

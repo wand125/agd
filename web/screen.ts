@@ -6,8 +6,8 @@
 export type PromptInfo = {
   question?: string;
   options: { key: string; label: string }[];
-  kind?: "numbered" | "cursor";   // cursor: 矢印+Enterで選ぶ形式
-  cursorIndex?: number;           // cursor形式での現在選択位置
+  kind?: "numbered" | "cursor" | "form";   // cursor: 矢印+Enterで選ぶ形式 / form: 複数項目を設定して確定
+  cursorIndex?: number;           // cursor/form での現在のカーソル行
 };
 
 export type TmuxPane = { tty: string; paneId: string; target: string };
@@ -60,6 +60,12 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
   };
   if (opts.length >= 2 && hasCursor)
     return { question: findQuestion(firstIdx), options: opts.slice(0, 8), kind: "numbered", cursorIndex: numCursorIdx };
+  // 設定フォーム(auto mode のセットアップ画面など)。行が「選択肢」ではなく
+  // ウィジェット(◀ 値 ▶ / [✔] / [ ])を持つ設定項目で、上下に動いて個別に
+  // 切り替えたうえで最後に Continue を押す。番号もカーソル選択も当たらないため
+  // これまでは {options: []} になり、UI に何も出せなかった
+  const form = detectForm(lines);
+  if (form) return form;
   // 非番号のカーソル選択(❯ Yes 形式)。空の入力プロンプト(❯ のみ)は除外
   const cursorIdx = lines.findIndex(l => /^\s*[❯›]\s+\S/.test(l) && !optRe.test(l));
   if (cursorIdx >= 0) {
@@ -82,4 +88,41 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     return { options: [] };
   }
   return null;
+}
+
+// 設定フォームの行を拾う。ウィジェットの形でしか判定しない(ラベル文字列に
+// 依存すると英語版以外や文言変更で黙って壊れるため)
+const FORM_WIDGET = /(◀\s*.+?\s*▶|\[[ xX✔✓*]\])\s*$/;
+// 確定ボタン。カーソルを合わせて Enter を押す行で、ウィジェットを持たない
+const FORM_SUBMIT = /^(Continue|Confirm|Done|OK|Save|Submit|続ける|確定|完了|保存)$/i;
+
+function detectForm(lines: string[]): PromptInfo | null {
+  const strip = (l: string) => (l ?? "").replace(/^\s*[❯›]\s*/, "").trim();
+  const rows: { key: string; label: string; line: number }[] = [];
+  let submit = -1;
+  lines.forEach((l, i) => {
+    const t = strip(l);
+    if (!t) return;
+    if (FORM_WIDGET.test(t)) rows.push({ key: `form:${rows.length}`, label: t.slice(0, 70), line: i });
+    else if (FORM_SUBMIT.test(t)) submit = i;
+  });
+  // ウィジェット行が2つ以上、かつ確定ボタンがある場合だけフォームと見なす。
+  // 片方でも欠けると、単なる文章や表を誤検出しかねない
+  if (rows.length < 2 || submit < 0) return null;
+  rows.push({ key: `form:${rows.length}`, label: strip(lines[submit]!).slice(0, 70), line: submit });
+  // カーソルは項目行にも確定ボタン行にも乗りうる。フォーム全体の見出しにも "❯"
+  // が付くことがあるので、行番号ではなく「フォームの行のうちカーソル付きのもの」を探す
+  const idx = rows.findIndex(r => /^\s*[❯›]\s+\S/.test(lines[r.line] ?? ""));
+  // 質問文はウィジェット行より上にある(先頭行が "❯ ...?" のこともある)
+  let question: string | undefined;
+  for (let i = rows[0]!.line - 1; i >= 0; i--) {
+    const t = strip(lines[i] ?? "");
+    if (/[??]$/.test(t)) { question = t.slice(0, 120); break; }
+  }
+  return {
+    question,
+    options: rows.map(({ key, label }) => ({ key, label })),
+    kind: "form",
+    cursorIndex: idx >= 0 ? idx : 0,
+  };
 }

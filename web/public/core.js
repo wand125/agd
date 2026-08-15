@@ -318,7 +318,17 @@ function answerPrompt(s, n) {
   if (n < 1 || n > count) return null;
   if (s.prompt.kind === "numbered" && s.agent === "claude") return sendKey(s, String(n));
   const delta = (n - 1) - (s.prompt.cursorIndex ?? 0);
-  return sendKeys(s, [...Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up"), "Enter"]);
+  const move = Array(Math.abs(delta)).fill(delta > 0 ? "Down" : "Up");
+  // フォームは「選んで確定」ではなく「その行に移動して切り替える」。行ごとに
+  // 確定キーが違うので、Enter を一律に送るとチェックの切り替えのつもりで
+  // フォーム全体を送信してしまう
+  if (s.prompt.kind === "form") {
+    const label = s.prompt.options[n - 1]?.label ?? "";
+    if (/(◀|▶)/.test(label)) return sendKeys(s, [...move, "Right"]);   // ◀ 値 ▶ は左右で切り替え
+    if (/\[[ xX✔✓*]\]/.test(label)) return sendKeys(s, [...move, "Space"]); // チェックボックスは Space
+    return sendKeys(s, [...move, "Enter"]);                            // Continue などの確定ボタン
+  }
+  return sendKeys(s, [...move, "Enter"]);
 }
 
 // ---------------- WebSocket ----------------

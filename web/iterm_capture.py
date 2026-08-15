@@ -30,6 +30,7 @@ KEYMAP = {
     "Left": "\x1b[D",
     "Tab": "\t",
     "ShiftTab": "\x1b[Z",
+    "Space": " ",
 }
 
 

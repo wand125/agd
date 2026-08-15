@@ -104,4 +104,53 @@ describe("detectPrompt", () => {
     const filler = Array.from({ length: 30 }, (_, i) => `output line ${i}`).join("\n");
     expect(detectPrompt(`${old}\n${filler}`)).toBeNull();
   });
+
+  // auto mode のセットアップ画面。番号でもカーソル選択でもないため、以前は
+  // {options: []} になって UI から一切操作できなかった
+  describe("設定フォーム", () => {
+    const autoModeScreen = [
+      "❯  Set up auto mode for your environment?",
+      "",
+      "   Claude Code reads this project, your recent Claude sessions, and optionally",
+      "  your shell history and other repositories.",
+      "",
+      "     How you use Claude here    ◀ Mixed ▶",
+      "     Also scan shell history    [✔]",
+      "   ❯ Also scan your other repos [ ]",
+      "",
+      "     Continue",
+    ].join("\n");
+
+    test("ウィジェット行と確定ボタンを選択肢として返す", () => {
+      const p = detectPrompt(autoModeScreen);
+      expect(p?.kind).toBe("form");
+      expect(p?.question).toBe("Set up auto mode for your environment?");
+      expect(p?.options.map(o => o.label)).toEqual([
+        "How you use Claude here    ◀ Mixed ▶",
+        "Also scan shell history    [✔]",
+        "Also scan your other repos [ ]",
+        "Continue",
+      ]);
+    });
+
+    // 見出し行にも "❯" が付くため、単純な findIndex だと 0 になってしまう
+    test("カーソル位置は見出しではなく項目行から求める", () => {
+      expect(detectPrompt(autoModeScreen)?.cursorIndex).toBe(2);
+    });
+
+    test("確定ボタンが無ければフォームとみなさない", () => {
+      const p = detectPrompt(["   A [✔]", "   B [ ]"].join("\n"));
+      expect(p?.kind).not.toBe("form");
+    });
+
+    test("ウィジェット行が1つだけならフォームとみなさない", () => {
+      const p = detectPrompt(["   Only one [✔]", "   Continue"].join("\n"));
+      expect(p?.kind).not.toBe("form");
+    });
+
+    // 通常のカーソル選択がフォーム扱いに化けると Space が飛んで壊れる
+    test("素のカーソル選択はフォームにしない", () => {
+      expect(detectPrompt(["Select?", " ❯ Yes", "   No"].join("\n"))?.kind).toBe("cursor");
+    });
+  });
 });

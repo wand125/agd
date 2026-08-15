@@ -192,7 +192,7 @@ export async function remoteSend(h: RemoteHost, paneId: string, text: string): P
 export async function remoteKey(h: RemoteHost, paneId: string, key: string): Promise<string> {
   const named: Record<string, string> = {
     ShiftTab: "BTab", Escape: "Escape", Enter: "Enter", Tab: "Tab",
-    Up: "Up", Down: "Down", Left: "Left", Right: "Right",
+    Up: "Up", Down: "Down", Left: "Left", Right: "Right", Space: "Space",
   };
   const k = named[key];
   if (k) await shRemote(h, `tmux send-keys -t ${q(paneId)} ${k}`);
