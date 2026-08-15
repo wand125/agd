@@ -66,8 +66,36 @@ describe("attach コマンドの組み立て", () => {
   });
 
   test("ホスト名はブラウザが今見ているものがそのまま入る", () => {
-    // Neo からは MagicDNS 名で開いているので、それがそのまま ssh 先になる
     expect(attachCmd({ host: "hiroakimacbook-m4", tmuxTarget: "agd-x1:0.0" }))
       .toContain("ssh hiroakimacbook-m4 ");
+  });
+});
+
+// Neo は ssh のポートフォワード(-L 8787:localhost:8787)経由で開くため、
+// location.hostname は localhost になり母艦のブラウザと区別が付かない。
+// そのまま ssh 先にすると「自分自身に ssh する」コマンドを渡してしまう。
+describe("ssh 先ホストの決定", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "web", "public", "app.js"), "utf8");
+  const start = src.indexOf("function sshHost(");
+  const body = src.slice(start, src.indexOf("\n}", start) + 2);
+  const make = (hostname: string, served: string) =>
+    new Function("location", "window", `${body}; return sshHost();`)(
+      { hostname }, { agdSshHost: served });
+
+  test("ポートフォワード越し(localhost)ならサーバーが教えた名前を使う", () => {
+    for (const h of ["localhost", "127.0.0.1", "::1"])
+      expect(make(h, "hiroakimacbook-m4")).toBe("hiroakimacbook-m4");
+  });
+
+  test("直接ホスト名で開いているならそれを尊重する", () => {
+    // tailscale serve や LAN 越しに素で開いている場合。サーバーの申告より
+    // 実際に届いている名前の方が確実
+    expect(make("hiroakimacbook-m4", "somethingelse")).toBe("hiroakimacbook-m4");
+    expect(make("192.168.11.8", "somethingelse")).toBe("192.168.11.8");
+  });
+
+  test("サーバーが名前を返せなくても localhost のまま壊れて出ない", () => {
+    // 貼っても動かないのは同じだが、少なくとも undefined を混ぜない
+    expect(make("localhost", "")).toBe("localhost");
   });
 });

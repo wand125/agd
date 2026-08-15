@@ -536,6 +536,22 @@ end run`;
 // 引くので、その結果をここに残して poll() から使い回す(list-panes を二度叩かないため)
 const tmuxTargetByTty = new Map<string, string>();
 
+// このホストに手元から ssh するときの宛先名。ポートフォワード越しに見ている
+// ブラウザへ渡し、attach コマンドの ssh 先として使わせる。
+// AGD_SSH_HOST で上書きできる(~/.ssh/config のエイリアスを使いたい場合など)。
+let sshHostCache: string | undefined;
+async function sshHostName(): Promise<string> {
+  if (sshHostCache !== undefined) return sshHostCache;
+  const env = (process.env.AGD_SSH_HOST || "").trim();
+  if (env) return (sshHostCache = env);
+  // ローカル名(.local)より tailnet 名の方が外から届きやすいので優先する
+  const ts = (await sh(["/bin/sh", "-c",
+    "tailscale status --json 2>/dev/null | /usr/bin/python3 -c "
+    + "'import json,sys;print(json.load(sys.stdin)[\"Self\"][\"DNSName\"].split(\".\")[0])' 2>/dev/null"])).trim();
+  if (ts) return (sshHostCache = ts);
+  return (sshHostCache = (await sh(["hostname", "-s"])).trim() || "localhost");
+}
+
 async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   const panes = await tmuxPanes();
@@ -1674,7 +1690,10 @@ try {
       }
       // AGD_PATH_STRIP: 表示上「…」に短縮する共通パスプレフィックス(例: ~/projects)
       const pathStrip = (process.env.AGD_PATH_STRIP ?? "").replace(/^~(?=\/|$)/, HOME);
-      return Response.json({ ...config, pathStrip, readOnly: READONLY });
+      // ssh のポートフォワード越しに見ていると location.hostname が localhost になり、
+      // 手元に渡す attach コマンドが「自分自身に ssh する」壊れたものになる。
+      // このホストの名前を渡して、フロント側でそれを ssh 先として使えるようにする
+      return Response.json({ ...config, pathStrip, readOnly: READONLY, sshHost: await sshHostName() });
     }
     if (req.method === "POST" && url.pathname === "/api/key") {
       const { tty, key, keys, cardKey } = await req.json();

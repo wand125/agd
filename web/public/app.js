@@ -156,6 +156,8 @@ $("notify-toggle").onchange = async (e) => {
 fetch("/api/config").then(r => r.json()).then(c => {
   $("mac-notify-toggle").checked = !!c.macNotify;
   agd.pathStrip = c.pathStrip || "";
+  // ポートフォワード越しに見ているとき、attach コマンドの ssh 先に使う
+  window.agdSshHost = c.sshHost || "";
   render();
 });
 $("mac-notify-toggle").onchange = (e) => api("/api/config", { macNotify: e.target.checked });
@@ -823,24 +825,24 @@ async function jump(key) {
     if (!(r.result || "").startsWith("ok")) openAttach(r.needAttach ?? { host: s.remote.host, tmuxSession: (s.remote.target || "").split(":")[0] });
     return;
   }
-  // 別マシンから見ているときに focus を投げても、前面に出るのは母艦の画面で
-  // 手元には何も起きない。代わりに手元で貼れる attach コマンドを出す
-  if (!isLocalView()) {
-    openAttach({ host: sshHost(), tmuxTarget: s.tmuxTarget || "", copyOnly: true });
-    return;
-  }
   if (!s.tty) { toast(t("toast.ttyJumpUnknown")); return; }
-  await api("/api/focus", { tty: s.tty });
+  const r = await api("/api/focus", { tty: s.tty });
+  // フォーカスできない = 前面に出すべき iTerm2 がそもそも無い(母艦が GUI 未ログイン)、
+  // もしくは別マシンから見ていて母艦の画面が手元に無い。どちらの場合も
+  // 手元のターミナルに貼れる attach コマンドを出すのが唯一届く手段になる。
+  //
+  // ブラウザのホスト名では判定できない。Neo からは ssh のポートフォワード経由で
+  // localhost:8787 を開いており、母艦のブラウザと見分けが付かないため。
+  // 実際に focus を投げて結果を見るのが確実で、母艦に GUI が戻れば自動で元に戻る
+  if (!(r.result || "").startsWith("ok"))
+    openAttach({ host: sshHost(), tmuxTarget: s.tmuxTarget || "", copyOnly: true });
 }
-// このブラウザが母艦上で動いているか。母艦なら focus が実際に画面へ届く。
-// 判定はサーバー側の IP では行えない(tailscale serve 経由だと外部からの
-// アクセスも 127.0.0.1 として届くため)。ブラウザ自身に尋ねるのが確実
-function isLocalView() {
-  return /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(location.hostname);
+// attach 先のホスト名。ポートフォワード越しだと localhost になってしまうので、
+// その場合はサーバーが自分のホスト名を教えてくれるまで m4 を既定にする
+function sshHost() {
+  const h = location.hostname;
+  return /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(h) ? (window.agdSshHost || h) : h;
 }
-// attach 先のホスト名。ブラウザが今使っているホスト名がそのまま ssh 先になる
-// (Neo からは MagicDNS 名でアクセスしているため)。IP の場合もそのまま通る
-function sshHost() { return location.hostname; }
 // textarea の自動リサイズ(改行で上に伸びる)
 function autoGrow(ta, max) {
   ta.style.height = "auto";
