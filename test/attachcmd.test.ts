@@ -83,8 +83,10 @@ describe("ssh 先ホストの決定", () => {
       { hostname }, { agdSshHost: served });
 
   test("ポートフォワード越し(localhost)ならサーバーが教えた名前を使う", () => {
+    // サーバーは user@host 形式で返す。手元(Neo=hiroaki)と母艦(HHosono)で
+    // ユーザー名が違い、名前だけだと Permission denied になる(実際に踏んだ)
     for (const h of ["localhost", "127.0.0.1", "::1"])
-      expect(make(h, "hiroakimacbook-m4")).toBe("hiroakimacbook-m4");
+      expect(make(h, "HHosono@hiroakimacbook-m4")).toBe("HHosono@hiroakimacbook-m4");
   });
 
   test("直接ホスト名で開いているならそれを尊重する", () => {

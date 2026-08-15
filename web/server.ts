@@ -544,12 +544,18 @@ async function sshHostName(): Promise<string> {
   if (sshHostCache !== undefined) return sshHostCache;
   const env = (process.env.AGD_SSH_HOST || "").trim();
   if (env) return (sshHostCache = env);
+  // 手元のマシンとこのホストでユーザー名が違うのが普通(Neo は hiroaki、
+  // 母艦は HHosono)。名前だけ渡すと手元のユーザー名で ssh して弾かれるので
+  // 必ず user@ を付ける。実際に Permission denied を踏んだ
+  const user = (await sh(["/usr/bin/id", "-un"])).trim();
+  const at = user ? `${user}@` : "";
   // ローカル名(.local)より tailnet 名の方が外から届きやすいので優先する
   const ts = (await sh(["/bin/sh", "-c",
     "tailscale status --json 2>/dev/null | /usr/bin/python3 -c "
     + "'import json,sys;print(json.load(sys.stdin)[\"Self\"][\"DNSName\"].split(\".\")[0])' 2>/dev/null"])).trim();
-  if (ts) return (sshHostCache = ts);
-  return (sshHostCache = (await sh(["hostname", "-s"])).trim() || "localhost");
+  if (ts) return (sshHostCache = at + ts);
+  const hn = (await sh(["hostname", "-s"])).trim();
+  return (sshHostCache = hn ? at + hn : "localhost");
 }
 
 async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
