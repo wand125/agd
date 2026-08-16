@@ -1089,6 +1089,10 @@ function keySplit(e) {
     };
     // ピンはどちらのペインにいても、選択中のセッションに効く
     if (e.key === "p" && listKey) { e.preventDefault(); togglePin(listKey); return true; }
+    // 新規起動もペインに依らない操作(グリッド/リストと同じ n)。
+    // 入力欄に文字として入る心配は無い(グローバルの keydown が INPUT/TEXTAREA/
+    // SELECT を除外している)。Ctrl+N は既存の複製なので明示的に外す
+    if (e.key === "n" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openNew(); return true; }
     if (splitPane === "list") {
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return true; }
       if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return true; }
