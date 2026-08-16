@@ -886,10 +886,34 @@ function nextTmuxName(): string {
 
 // agent 起動コマンドを tmux 内で走らせる形に包む。
 // 終了後すぐペインが消えると落ちた理由が読めないので、シェルを残して確認できるようにする
-function wrapTmux(inner: string): string {
+function wrapTmux(inner: string, name = nextTmuxName()): string {
   if (!USE_TMUX || !hasTmux()) return inner;
   // 起動されるターミナル側も PATH が細い場合があるため tmux は絶対パスで呼ぶ
-  return `${tmuxBin()} new-session -s ${shq(nextTmuxName())} ${shq(inner + "; exec $SHELL")}`;
+  return `${tmuxBin()} new-session -s ${shq(name)} ${shq(inner + "; exec $SHELL")}`;
+}
+
+// iTerm を経由せず、tmux セッションだけを detached で起こす。
+//
+// GUI ログインしていない(ヘッドレス)環境では iTerm が起動できず、
+// AppleScript の "create window" が用語辞書を引けずに構文エラーになる。
+// 見えるタブは作れないが、agd が扱うのは tmux セッションなので、
+// detached で起こせば一覧にも出るし送信・画面取得もできる。
+async function openDetachedTmux(inner: string): Promise<string> {
+  if (!hasTmux()) return "error: tmux が無いため端末を開けません";
+  const name = nextTmuxName();
+  const r = await runCommand([tmuxBin(), "new-session", "-d", "-s", name, `${inner}; exec $SHELL`]);
+  if (r.err.trim()) return "error: " + r.err.trim().split("\n")[0].slice(0, 200);
+  return `ok(tmux:${name})`;
+}
+
+// 端末で起動する。GUI が使えるなら iTerm に新規タブ、駄目なら tmux detached。
+// 呼び出し側から見た成否の伝え方は同じ("ok…" か "error: …")
+async function openInTerminal(inner: string): Promise<string> {
+  const r = await shStrict(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
+  if (!r.startsWith("error")) return r;
+  const fallback = await openDetachedTmux(inner);
+  // どちらも駄目なら、最初の(より原因に近い)エラーを返す
+  return fallback.startsWith("error") ? r : fallback;
 }
 
 // fork=true: 会話履歴を引き継ぎつつ新しいセッションIDに分岐する。
@@ -900,8 +924,7 @@ async function openResume(agent: string, sid: string, cwd: string, fork = false)
   const inner = agent === "claude"
     ? `cd ${q(cwd)} && claude --resume ${sid}${fork ? " --fork-session" : ""}`
     : `cd ${q(cwd)} && codex ${fork ? "fork" : "resume"} ${sid}`;
-  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
-  return "ok";
+  return await openInTerminal(inner);
 }
 
 // ---------------------------------------------------------------- トランスクリプト解析は transcript.ts へ移設
@@ -1204,8 +1227,9 @@ function enrichHits(raw: { path: string; agent: string; sid: string; mtime: numb
 // ---------------------------------------------------------------- 新規セッション起動
 async function openNew(agent: string, cwd: string): Promise<string> {
   const inner = `cd ${shq(cwd)} && ${agent === "codex" ? "codex" : "claude"}`;
-  await sh(["osascript", "-", wrapTmux(inner)], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
-  return "ok";
+  // sh() は終了コードも stderr も捨てるため、iTerm が開けなくても "ok" を
+  // 返していた(GUI ログインしていないヘッドレス環境では必ず失敗する)
+  return await openInTerminal(inner);
 }
 
 // リモートの tmux セッションに attach する新規タブを開く。
@@ -1216,8 +1240,8 @@ async function openRemoteAttach(h: RemoteHost, tmuxSession: string): Promise<str
   // リモート側の PATH を通してから attach(非対話シェルは .bashrc を読まないため)
   const inner = `export PATH=${path}:$PATH; tmux attach -t ${q(tmuxSession)}`;
   const cmd = `ssh ${q(h.host)} -t ${q(inner)}`;
-  await sh(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
-  return "ok";
+  // openNew と同じ理由で shStrict を使う(失敗を "ok" として返さない)
+  return await shStrict(["osascript", "-", cmd], ITERM_NEWTAB_SCRIPT, OSASCRIPT_TIMEOUT_MS);
 }
 
 // ---------------------------------------------------------------- スラッシュコマンド一覧
@@ -1733,6 +1757,9 @@ try {
         }
       }
       const r = await openNew(agent === "codex" ? "codex" : "claude", abs);
+      // 起動できなかったときは error として返す。UI 側は result しか見ないと
+      // 失敗を成功として扱ってしまう
+      if (r.startsWith("error")) return Response.json({ error: r.replace(/^error:\s*/, "") }, { status: 500 });
       return Response.json({ result: r });
     }
     if (url.pathname === "/api/transcript") {
@@ -1888,6 +1915,7 @@ try {
       // (素の resume だと同一トランスクリプトに追記されログが交錯するため)
       const isRunning = lastSnapshot.sessions.some(s => s.running && s.sid === sid);
       const r = await openResume(agent, sid, cwd, !!fork || isRunning);
+      if (r.startsWith("error")) return Response.json({ error: r.replace(/^error:\s*/, "") }, { status: 500 });
       return Response.json({ result: r });
     }
     return new Response("not found", { status: 404 });

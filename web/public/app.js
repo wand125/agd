@@ -1673,7 +1673,15 @@ async function resumeContinue(key) {
   const s = sessionOf(key);
   if (!s?.sid || !s?.cwd) { toast(t("toast.noResumable")); return; }
   // fork: 新しいセッションIDに分岐(素のresumeだと両プロセスが同一ログに追記して交錯する)
-  await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
+  // 応答を捨てると、端末が開けなかったときも成功したように見えてしまう
+  let r;
+  try {
+    r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
+  } catch (e) {
+    toast(t("toast.launchFailed", { err: String(e?.message ?? e) }));
+    return;
+  }
+  if (r?.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent: s.agent, cwd: s.cwd,
     keys: new Set(agd.sessions.filter(x => x.running).map(x => x.key)),
