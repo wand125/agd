@@ -289,7 +289,7 @@ let treeHome = "";
 
 function openNewSheet() {
   $("new-bg").classList.add("on");
-  $("new-agent").textContent = newAgent;
+  paintNewAgent();
   renderNewList();
   // 候補は開くたびに取り直す(新しく使った場所を反映するため)
   fetch("/api/projects").then(r => r.json()).then(({ projects }) => {
@@ -349,9 +349,16 @@ function renderNewList() {
 $("btn-new").onclick = openNewSheet;
 $("new-close").onclick = closeNewSheet;
 $("new-bg").onclick = (e) => { if (e.target === $("new-bg")) closeNewSheet(); };
-$("new-agent").onclick = () => {
-  newAgent = newAgent === "claude" ? "codex" : "claude";
-  $("new-agent").textContent = newAgent;
+// トグルの見た目を現在値に合わせる(textContent を書き換えると中の2択が消える)
+function paintNewAgent() {
+  $("new-agent").querySelectorAll(".opt")
+    .forEach(o => o.classList.toggle("on", o.dataset.agent === newAgent));
+}
+$("new-agent").onclick = (e) => {
+  const opt = e.target.closest(".opt");
+  // 片方を直接押したらそれを選ぶ。枠の余白なら切り替え
+  newAgent = opt ? opt.dataset.agent : (newAgent === "claude" ? "codex" : "claude");
+  paintNewAgent();
 };
 $("new-tabs").onclick = (e) => {
   const tb = e.target.closest(".ntab");

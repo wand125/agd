@@ -1579,6 +1579,7 @@ function openNew() {
   $("new-overlay").classList.add("show");
   $("new-cwd").value = "";
   newSel = 0;
+  paintNewAgent();   // 前回 Tab で切り替えた状態を正しく映す
   // 候補はセッション一覧から最終アクティビティ順に(APIの一覧も合流)
   const ageByCwd = new Map();
   agd.sessions.forEach(s => {
@@ -1689,12 +1690,24 @@ async function resumeContinue(key) {
   };
   toast(t("toast.forked", { agent: s.agent }));
 }
+// トグルの見た目を現在値に合わせる。textContent を書き換えると中の
+// 2択そのものが消えてしまうので、クラスの付け替えだけで表す
+function paintNewAgent() {
+  $("new-agent-chip").querySelectorAll(".opt")
+    .forEach(o => o.classList.toggle("on", o.dataset.agent === newAgent));
+}
 function toggleNewAgent() {
   newAgent = newAgent === "claude" ? "codex" : "claude";
-  $("new-agent-chip").textContent = newAgent;
+  paintNewAgent();
 }
 $("new-btn").onclick = openNew;
-$("new-agent-chip").onclick = toggleNewAgent;
+// 片方を直接クリックしたときはそれを選ぶ。枠の余白を押したときは切り替え
+// (Tab キーの挙動と揃える)
+$("new-agent-chip").onclick = (e) => {
+  const opt = e.target.closest(".opt");
+  if (opt) { newAgent = opt.dataset.agent; paintNewAgent(); }
+  else toggleNewAgent();
+};
 $("new-overlay").onclick = (e) => { if (e.target === $("new-overlay")) closeNew(); };
 $("new-cwd").oninput = () => {
   newSel = 0;

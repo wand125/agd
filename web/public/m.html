@@ -254,6 +254,13 @@
   #new-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 8px; }
   #new-title { font-size: 15px; font-weight: 600; }
   #new-agent { margin-left: auto; }
+  /* エージェント切替。今の値だけでなく選べる側も見えるように両方並べる。
+     指で押すので PC 版より当たり判定を大きめに取る */
+  .agent-toggle { display: inline-flex; background: #21262d; border: 1px solid var(--border);
+                  border-radius: 13px; padding: 2px; flex: none; }
+  .agent-toggle .opt { font-size: 12px; padding: 5px 12px; border-radius: 11px; color: var(--dim);
+                       transition: background .12s, color .12s; }
+  .agent-toggle .opt.on { background: var(--accent); color: #0d1117; font-weight: 600; }
   #new-tabs { display: flex; gap: 2px; background: #21262d; border-radius: 9px; padding: 2px; flex: none; }
   .ntab { flex: 1; text-align: center; padding: 8px; font-size: 13px; color: var(--dim); border-radius: 7px; }
   .ntab.on { background: var(--panel); color: var(--fg); }
@@ -319,7 +326,9 @@
   <div id="new-sheet">
     <div id="new-head">
       <span id="new-title" data-i18n="m.new.title">New session</span>
-      <button class="chip" id="new-agent">claude</button>
+      <span class="agent-toggle" id="new-agent">
+        <span class="opt on" data-agent="claude">claude</span><span class="opt" data-agent="codex">codex</span>
+      </span>
       <button class="hbtn" id="new-close" aria-label="Close">
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
