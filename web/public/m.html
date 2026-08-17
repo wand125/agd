@@ -283,6 +283,11 @@
            border: 1px solid var(--border); border-radius: 20px; padding: 9px 18px;
            font-size: 13.5px; z-index: 60; max-width: 88vw; text-align: center; }
   @keyframes toastIn { from { transform: translate(-50%, 10px); opacity: 0; } }
+  /* 失敗は赤で示す。送信できていないことに気づけないと、打ち直しの機会を逃す */
+  textarea.send-failed, input.send-failed { border-color: var(--waiting) !important;
+    box-shadow: 0 0 0 2px rgba(248,81,73,.25); }
+  .toast.error { background: #3a1113; border-color: var(--waiting); color: #ffd7d5;
+                 box-shadow: 0 4px 18px rgba(0,0,0,.5); }
 
   /* 動きを減らす設定の端末では演出を止める */
   @media (prefers-reduced-motion: reduce) {

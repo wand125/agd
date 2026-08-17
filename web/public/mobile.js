@@ -129,7 +129,7 @@ async function answer(s, n) {
     // r が null なのは「待機中でない/範囲外」。加えてサーバー側で送れなかった
     // 場合({result:"error: …"})もある。後者を見ていないと、届いていないのに
     // 「送信しました」と出してプロンプトまで畳んでしまっていた
-    if (!r || sendFailure(r)) { toast(t("m.answerFailed")); return; }
+    if (!r || sendFailure(r)) { toastError(t("m.answerFailed")); return; }
     toast(t("m.sent"));
     // 複数選択はチェックを重ねてから確定するので、確定するまで畳んではいけない。
     // 畳むと2つ目以降にチェックを付けられなくなる
@@ -143,7 +143,7 @@ async function answer(s, n) {
     if (openKey === s.key) paintDetail(cur ?? s);
   } catch (e) {
     // 通信断などで送信できなかった場合。黙って固まらせない
-    toast(t("m.answerFailed"));
+    toastError(t("m.answerFailed"));
   } finally {
     answering = false;
   }
@@ -263,13 +263,13 @@ $("sheet-cancel").onclick = closeSheet;
 // 複製: 会話を引き継いで別セッションとして分岐する(PC版の Ctrl+C と同じ)
 async function launchFrom(key, dup) {
   const s = sessionOf(key);
-  if (!s?.cwd) { toast(t("m.launchFailed")); return; }
+  if (!s?.cwd) { toastError(t("m.launchFailed")); return; }
   closeSheet();
   let r;
   try {
     if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
     else r = await api("/api/new", { agent: s.agent, cwd: s.cwd });
-  } catch { toast(t("m.launchFailed")); return; }
+  } catch { toastError(t("m.launchFailed")); return; }
   // 端末を開けなかった場合はサーバーが error を返す(result は無い)
   toast(!r?.error && (r.result || "").startsWith("ok")
     ? t("m.launched", { name: projName(s.cwd) })
@@ -385,7 +385,7 @@ $("new-list").onclick = async (e) => {
     // 端末が開けないと result ではなく error が返る。成功として扱わない
     toast(r?.error ? t("m.launchFailed") : t("m.launched", { name: projName(cwd) }));
   } catch {
-    toast(t("m.launchFailed"));
+    toastError(t("m.launchFailed"));
   } finally { newLaunching = false; }
 };
 
@@ -415,7 +415,7 @@ $("sheet-kill").onclick = async () => {
     const r = await api("/api/close", { ...target(s), cardKey: s.key });
     toast((r.result || "").startsWith("ok") ? t("m.killed", { name }) : t("m.killFailed"));
   } catch {
-    toast(t("m.killFailed"));
+    toastError(t("m.killFailed"));
   }
 };
 
@@ -599,10 +599,10 @@ async function send() {
   // 電波の悪い場所ほど起きるので、失敗はすべて「本文を戻す」に集約する
   let r;
   try { r = await sendText(s, text); }
-  catch { $("dinput").value = text; saveDraft(s.key, text); toast(t("m.sendFailed")); return; }
+  catch { $("dinput").value = text; saveDraft(s.key, text); markSendFailed($("dinput")); toastError(t("m.sendFailed")); return; }
   const err = sendFailure(r);
   if (!err) saveDraft(s.key, "");
-  else { $("dinput").value = text; saveDraft(s.key, text); }   // 失敗時は打ち直させない
+  else { $("dinput").value = text; saveDraft(s.key, text); markSendFailed($("dinput")); }   // 失敗時は打ち直させない
   toast(t(err ? "m.sendFailed" : "m.sent"));
 }
 $("dsendbtn").onclick = send;

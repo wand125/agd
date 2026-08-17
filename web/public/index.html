@@ -303,7 +303,16 @@
   .proj-row.sel { background: rgba(88,166,255,.15); outline: 1px solid var(--accent); }
   .proj-row .card-meta { margin-left: auto; }
   #empty { color: var(--dim); padding: 40px; text-align: center; }
-  .toast { position: fixed; bottom: 16px; right: 16px; background: #21262d; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; z-index: 30; }
+  .toast { position: fixed; bottom: 16px; right: 16px; background: #21262d; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 13px; z-index: 30; max-width: 46vw; }
+  /* 失敗は成功と同じ見た目だと隅で光って消えるだけで気づけない。
+     画面中央に大きく出し、赤で示す(送信できていないことは知る必要がある) */
+  /* 送信に失敗した入力欄。本文はここに戻っているので、そのことを示す */
+  textarea.send-failed, input.send-failed { border-color: var(--waiting) !important;
+    box-shadow: 0 0 0 2px rgba(248,81,73,.25); }
+  .toast.error { right: 50%; transform: translateX(50%); bottom: auto; top: 76px;
+                 background: #3a1113; border-color: var(--waiting); color: #ffd7d5;
+                 font-size: 14px; padding: 12px 18px; max-width: 70vw;
+                 box-shadow: 0 6px 24px rgba(0,0,0,.5); }
   #cmdline { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--border); padding: 5px 12px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; z-index: 25; align-items: center; gap: 2px; }
   #cmdline input { flex: 1; background: none; border: none; color: var(--fg); font: inherit; outline: none; }
   #hint-panel { display: none; position: fixed; background: #1c2129; border: 1px solid var(--border); border-radius: 8px; z-index: 40; max-height: 280px; overflow-y: auto; min-width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 3px; }

@@ -354,15 +354,32 @@ const closeSession = (s) => api("/api/close", { ...target(s) });
 // 共通層に置く(以前は PC/モバイルで別実装になっており、表示時間が
 // 2500ms と 2200ms に食い違っていた)
 let toastTimer = null;
-function toast(msg) {
+// kind: "error" を渡すと赤く出し、表示時間も長くする。
+// 成功と失敗が同じ見た目・同じ2.5秒だったため、PC の大きい画面では隅で
+// 一瞬光って消えるだけになり、送れていないことに気づけなかった
+function toast(msg, kind) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
   const el = document.createElement("div");
-  el.className = "toast";
+  el.className = "toast" + (kind === "error" ? " error" : "");
   el.textContent = msg;
   document.body.appendChild(el);
   // 前回のタイマーを止めないと、古い timeout が新しいトーストを消してしまう
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 2500);
+  // 失敗は読む必要がある(何が起きたか・打ち直しが要るか)ので長めに出す
+  toastTimer = setTimeout(() => el.remove(), kind === "error" ? 6000 : 2500);
+}
+// 失敗表示の入口を1つにする。呼び元が kind を渡し忘れる事故を防ぐ
+function toastError(msg) { toast(msg, "error"); }
+
+// 送信に失敗した入力欄を目立たせる。トーストは画面の隅に出るので、
+// 大きいディスプレイでは見落としやすい。本文が戻っている欄そのものを
+// 赤くして「送れていない・ここに残っている」を示す
+function markSendFailed(el) {
+  if (!el) return;
+  el.classList.add("send-failed");
+  const clear = () => el.classList.remove("send-failed");
+  el.addEventListener("input", clear, { once: true });
+  setTimeout(clear, 6000);
 }
 
 // ---------------- 許可プロンプトへの応答 ----------------

@@ -560,10 +560,10 @@ async function sendNamedKey(k, label) {
   if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
   let r;
   try { r = await api("/api/key", { ...target(s), key: k }); }
-  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
   const err = sendFailure(r);
   if (!err) toast(t("toast.sentTo", { action: label, name: s.name }));
-  else toast(t("toast.sendFailed", { err }));
+  else toastError(t("toast.sendFailed", { err }));
 }
 // 選択セッションへテキスト送信(スラッシュコマンド用)
 async function sendTextToSelected(text) {
@@ -572,10 +572,10 @@ async function sendTextToSelected(text) {
   // 通信断で例外になる経路が抜けていた(唯一 try が無かった)
   let r;
   try { r = await api("/api/send", { ...target(s), text }); }
-  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
   const err = sendFailure(r);
   if (!err) toast(t("toast.sentTo", { action: text, name: s.name }));
-  else toast(t("toast.sendFailed", { err }));
+  else toastError(t("toast.sendFailed", { err }));
 }
 async function runCommand(c) {
   if (c === "q") {
@@ -592,7 +592,7 @@ async function runCommand(c) {
         toast(t("toast.closed", { name: s.name }));
         if (viewing) closeDetail();  // 表示中のセッションを終了したらポップアップも閉じる
       }
-      else { closing.delete(s.key); render(); toast(t("toast.closeFailed", { err: r.result })); }
+      else { closing.delete(s.key); render(); toastError(t("toast.closeFailed", { err: r.result })); }
     } else {
       archived.add(s.key);
       saveArchived();
@@ -659,7 +659,7 @@ async function resumeSession(s) {
   try {
     await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
   } catch (e) {
-    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    toastError(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { resumeBusy = false; }
   toast(t("toast.resumed", { agent: s.agent }));
@@ -822,12 +822,12 @@ function renderPromptBar(bar, s) {
           r = await api("/api/key", { ...target(s), key: b.dataset.key });
         }
       } catch (err) {
-        toast(t("toast.sendFailed", { err: String(err?.message ?? err) }));
+        toastError(t("toast.sendFailed", { err: String(err?.message ?? err) }));
         return;
       } finally { b.disabled = false; }
       const err = sendFailure(r);
       if (!err) toast(t("toast.sent"));
-      else toast(t("toast.sendFailed", { err }));
+      else toastError(t("toast.sendFailed", { err }));
     };
   });
 }
@@ -851,7 +851,7 @@ function answerPromptByNumber(sessKey, n) {
   const toggled = s.prompt.kind === "form" && /(◀|▶|\[[ xX✔✓*]\])/.test(label);
   const msg = s.prompt.kind === "numbered" && s.agent === "claude" ? "toast.numberSent"
     : toggled ? "toast.optionToggled" : "toast.optionConfirmed";
-  r.then(() => toast(t(msg, { n }))).catch(e => toast(t("toast.sendFailed", { err: String(e?.message ?? e) })));
+  r.then(() => toast(t(msg, { n }))).catch(e => toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })));
   return true;
 }
 // 空欄 Enter での「確定」: 入力待ちセッションにのみ Enter キーを送る(誤爆防止)
@@ -865,10 +865,10 @@ async function confirmEnter(key) {
     const r = await api("/api/key", { ...target(s), key: "Enter" });
     const err = sendFailure(r);
     if (!err) toast(t("toast.enterSent"));
-    else toast(t("toast.sendFailed", { err }));
+    else toastError(t("toast.sendFailed", { err }));
   } catch (e) {
     // 通信断。finally でフラグは戻るが、例外自体は握らないと未処理のまま
-    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    toastError(t("toast.sendFailed", { err: String(e?.message ?? e) }));
   } finally { confirmBusy = false; }
 }
 
@@ -917,7 +917,7 @@ async function sendTo(key, input) {
   const s = sessionOf(key);
   const text = input.value.replace(/\s+$/, "");  // 末尾の空白改行だけ除去(内部改行は保持)
   if (!s || !text.trim() || input.dataset.busy) return;  // 送信中の再入を防ぐ
-  if (!canOperate(s)) { toast(t("toast.ttySendUnknown")); return; }
+  if (!canOperate(s)) { toastError(t("toast.ttySendUnknown")); return; }
   input.dataset.busy = "1";
   input.value = "";                          // 先にクリアして二重送信を防止
   autoGrow(input, 140);
@@ -927,13 +927,13 @@ async function sendTo(key, input) {
   try {
     r = await api("/api/send", { ...target(s), text });
   } catch (e) {
-    input.value = text; autoGrow(input, 140);
-    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    input.value = text; autoGrow(input, 140); markSendFailed(input);
+    toastError(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { delete input.dataset.busy; }
   const err = sendFailure(r);
   if (!err) toast(t("toast.sent"));
-  else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err })); }  // 失敗時は復元
+  else { input.value = text; autoGrow(input, 140); markSendFailed(input); toastError(t("toast.sendFailed", { err })); }  // 失敗時は復元
 }
 
 
@@ -990,7 +990,7 @@ async function runAttach() {
   closeAttach();
   const r = await api("/api/remote-attach", info);
   if ((r.result || "").startsWith("ok")) toast(t("attach.opened", { host: info.host }));
-  else toast(t("toast.launchFailed", { err: r.error || r.result }));
+  else toastError(t("toast.launchFailed", { err: r.error || r.result }));
 }
 // http:// では navigator.clipboard が使えない(セキュアコンテキスト限定)。
 // Neo からは素の http で開くのが普通なので、必ず textarea 方式へ落とす
@@ -1447,7 +1447,7 @@ async function loadOlder() {
   // ユーザーが押して起きる操作なので、黙って無反応にせず知らせる
   let data;
   try { data = await fetchTranscript(s, { before: logStart }); }
-  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
   if (seq !== logSeq) return;
   const added = data.entries.length;
   logEntries = [...data.entries, ...logEntries];
@@ -1485,7 +1485,7 @@ function renderLog(force) {
       if (!s) return;
       let entry;
       try { ({ entry } = await fetchTranscript(s, { entry: logStart + i })); }
-      catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+      catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
       if (entry) {
         const me = isMasked() ? { ...entry, text: maskText(entry.text) } : entry;
         const pre = el.querySelector("pre");
@@ -1512,7 +1512,7 @@ async function sendDetail() {
   const s = sessionOf(detailKey);
   const text = $("d-input").value.replace(/\s+$/, "");
   if (!text) { if (detailKey) confirmEnter(detailKey); return; }
-  if (!canOperate(s)) { toast(t("toast.detailNotRunning")); return; }
+  if (!canOperate(s)) { toastError(t("toast.detailNotRunning")); return; }
   if (detailSendBusy) return;                // 送信中の再入を防ぐ
   detailSendBusy = true;
   $("d-input").value = "";                   // 先にクリアして二重送信を防止
@@ -1524,13 +1524,13 @@ async function sendDetail() {
   try {
     r = await api("/api/send", { ...target(s), text });
   } catch (e) {
-    $("d-input").value = text; autoGrow($("d-input"), 200);
-    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
+    $("d-input").value = text; autoGrow($("d-input"), 200); markSendFailed($("d-input"));
+    toastError(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { detailSendBusy = false; }
   const err = sendFailure(r);
   if (!err) toast(t("toast.sent"));
-  else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err })); }
+  else { $("d-input").value = text; autoGrow($("d-input"), 200); markSendFailed($("d-input")); toastError(t("toast.sendFailed", { err })); }
 }
 $("d-input").oninput = () => { updateSlashHints($("d-input"), () => sessionOf(detailKey)); autoGrow($("d-input"), 200); };
 $("d-input").onkeydown = (e) => {
@@ -1681,10 +1681,10 @@ async function launchNew(agent, cwd, create = false) {
   try {
     r = await api("/api/new", { agent, cwd, create });
   } catch (e) {
-    toast(t("toast.launchFailed", { err: String(e?.message ?? e) }));
+    toastError(t("toast.launchFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { newLaunchBusy = false; }
-  if (r.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
+  if (r.error) { toastError(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent, cwd,
     keys: new Set(agd.sessions.filter(x => x.running).map(x => x.key)),
@@ -1709,10 +1709,10 @@ async function resumeContinue(key) {
   try {
     r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
   } catch (e) {
-    toast(t("toast.launchFailed", { err: String(e?.message ?? e) }));
+    toastError(t("toast.launchFailed", { err: String(e?.message ?? e) }));
     return;
   }
-  if (r?.error) { toast(t("toast.launchFailed", { err: r.error })); return; }
+  if (r?.error) { toastError(t("toast.launchFailed", { err: r.error })); return; }
   pendingSelect = {
     agent: s.agent, cwd: s.cwd,
     keys: new Set(agd.sessions.filter(x => x.running).map(x => x.key)),
