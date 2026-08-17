@@ -1053,6 +1053,9 @@ function keyPalette(e) {
     }
     // a = エージェント切替(claude ⇄ codex)。Tab も従来どおり効く
     else if (e.key === "a" || e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
+    // o = 選択中のフォルダを開く(潜る)。⏎ は起動にも使うため、
+    // 「開くだけ」を別のキーに分けておくと迷わない
+    else if (e.key === "o") { e.preventDefault(); openSelectedDir(); }
     else if (e.key === "Enter") launchFromPalette();
     else if (e.key === "Escape" || e.key === "q") closeNew();
     return true;
@@ -1824,6 +1827,21 @@ $("new-cwd").oninput = () => {
   if (isPathMode()) fetchDirCands();
   else { newDirCands = []; renderNewList(); }
 };
+// 選択中の行のフォルダを開く。フォルダタブでは潜り、使用履歴タブでは
+// その場所をフォルダタブで開き直す(「この近くを見たい」に応える)
+function openSelectedDir() {
+  const item = newFiltered()[newSel];
+  if (!item?.cwd) return;
+  // 「ここで起動」の行で押しても同じ階層を開き直すだけなので何もしない
+  if (item.here) return;
+  if (newTab !== "tree") {
+    newTab = "tree";
+    [...$("new-tabs").children].forEach(c => c.classList.toggle("on", c.dataset.tab === "tree"));
+    $("new-cwd").value = "";
+  }
+  loadTree(item.cwd);
+}
+
 function launchFromPalette() {
   const typed = $("new-cwd").value.trim();
   // パス入力モードでもディレクトリ候補が選択されていればそれを優先
