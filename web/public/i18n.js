@@ -12,6 +12,10 @@ const STRINGS = {
     // ---- mobile ----
     "m.empty": "No sessions match",
     "m.launchNew": "New session here",
+    "m.new.title": "New session",
+    "m.new.tabTree": "Browse",
+    "m.new.tabProj": "Recent",
+    "m.new.launchHere": "▶ Start here ({name})",
     "m.launchDup": "Duplicate this session",
     "m.cancel": "Cancel",
     "m.killSession": "Close this session",
@@ -256,6 +260,10 @@ const STRINGS = {
     // ---- mobile ----
     "m.empty": "該当するセッションがありません",
     "m.launchNew": "このプロジェクトで新規",
+    "m.new.title": "新規セッション",
+    "m.new.tabTree": "フォルダ",
+    "m.new.tabProj": "使用履歴",
+    "m.new.launchHere": "▶ ここで起動 ({name})",
     "m.launchDup": "このセッションを複製",
     "m.cancel": "キャンセル",
     "m.killSession": "このセッションを終了",

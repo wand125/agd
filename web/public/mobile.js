@@ -263,13 +263,122 @@ async function launchFrom(key, dup) {
   if (!s?.cwd) { toast(t("m.launchFailed")); return; }
   closeSheet();
   let r;
-  if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
-  else r = await api("/api/new", { agent: s.agent, cwd: s.cwd });
-  toast((r.result || "").startsWith("ok") ? t("m.launched", { name: projName(s.cwd) })
-                                          : t("m.launchFailed"));
+  try {
+    if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
+    else r = await api("/api/new", { agent: s.agent, cwd: s.cwd });
+  } catch { toast(t("m.launchFailed")); return; }
+  // 端末を開けなかった場合はサーバーが error を返す(result は無い)
+  toast(!r?.error && (r.result || "").startsWith("ok")
+    ? t("m.launched", { name: projName(s.cwd) })
+    : t("m.launchFailed"));
 }
 $("sheet-new").onclick = () => launchFrom(sheetKey, false);
 $("sheet-dup").onclick = () => launchFrom(sheetKey, true);
+
+// ---------------- 新規セッション(ヘッダーの ＋) ----------------
+// 起動先を2つのタブから選ぶ:
+//   プロジェクト … これまで使った作業ディレクトリ(/api/projects)
+//   セッション   … いま動いている/再開できるセッションの場所
+// エージェントは上部の chip で claude ⇄ codex を切り替える(PC版と同じ考え方)
+let newTab = "tree";
+let newAgent = "claude";
+let newProjects = [];
+let treeDir = "";        // ツリーでいま開いているディレクトリ(空=ホーム)
+let treeKids = [];
+let treeHome = "";
+
+function openNewSheet() {
+  $("new-bg").classList.add("on");
+  $("new-agent").textContent = newAgent;
+  renderNewList();
+  // 候補は開くたびに取り直す(新しく使った場所を反映するため)
+  fetch("/api/projects").then(r => r.json()).then(({ projects }) => {
+    newProjects = projects ?? [];
+    // ホームは /api/projects の先頭に入っている(cwd の共通祖先として必ず含まれる)
+    if (!treeHome) treeHome = (projects ?? []).find(p => /^\/(Users|home)\/[^/]+$/.test(p)) ?? "";
+    if (!treeDir) treeDir = treeHome;
+    if (newTab === "tree") loadTree(treeDir);
+    else renderNewList();
+  }).catch(() => {});
+}
+function closeNewSheet() { $("new-bg").classList.remove("on"); }
+
+// ディレクトリを1階層開く。中身は都度取りに行く(数千件のツリーを持たない)
+async function loadTree(dir) {
+  treeDir = dir;
+  treeKids = null;                 // 読み込み中
+  renderNewList();
+  try {
+    const r = await fetch(`/api/dirs?browse=1&q=${encodeURIComponent(dir + "/")}`);
+    const { dirs } = await r.json();
+    treeKids = dirs ?? [];
+  } catch { treeKids = []; }
+  renderNewList();
+}
+
+function renderNewList() {
+  const el = $("new-list");
+  if (newTab === "tree") {
+    if (treeKids === null) { el.innerHTML = `<div class="empty">${esc(t("m.loading"))}</div>`; return; }
+    // 先頭は「ここで起動」。辿ってきた場所そのものを選べないと行き止まりになる
+    let html = `<div class="nitem here" data-cwd="${escAttr(treeDir)}">
+        <span class="np">${esc(t("m.new.launchHere", { name: projName(treeDir) }))}</span>
+      </div>`;
+    // ホームより上には行かせない(辿る意味が無いうえ迷子になりやすい)
+    if (treeDir && treeHome && treeDir !== treeHome) {
+      const up = treeDir.slice(0, treeDir.lastIndexOf("/")) || "/";
+      html += `<div class="nitem up" data-dir="${escAttr(up)}"><span class="np">↑ ${esc(shortCwd(up))}</span></div>`;
+    }
+    html += treeKids.map(d =>
+      `<div class="nitem" data-dir="${escAttr(d)}">
+         <span class="np">📁 ${esc(d.slice(d.lastIndexOf("/") + 1))}</span>
+       </div>`).join("");
+    el.innerHTML = html;
+    el.scrollTop = 0;
+    return;
+  }
+  // 既存のパス一覧。これまで claude/codex を動かした場所
+  if (!newProjects.length) { el.innerHTML = `<div class="empty">${esc(t("m.loading"))}</div>`; return; }
+  el.innerHTML = newProjects.map(p =>
+    `<div class="nitem" data-cwd="${escAttr(p)}">
+       <span class="proj" style="background:${projColor(p)}">${esc(projName(p))}</span>
+       <span class="np">${esc(shortCwd(p))}</span>
+     </div>`).join("");
+}
+
+$("btn-new").onclick = openNewSheet;
+$("new-close").onclick = closeNewSheet;
+$("new-bg").onclick = (e) => { if (e.target === $("new-bg")) closeNewSheet(); };
+$("new-agent").onclick = () => {
+  newAgent = newAgent === "claude" ? "codex" : "claude";
+  $("new-agent").textContent = newAgent;
+};
+$("new-tabs").onclick = (e) => {
+  const tb = e.target.closest(".ntab");
+  if (!tb) return;
+  newTab = tb.dataset.tab;
+  [...$("new-tabs").children].forEach(c => c.classList.toggle("on", c === tb));
+  // ツリーへ戻ったときは中身を取り直す(未読込のまま「読み込み中」で止まらないように)
+  if (newTab === "tree" && treeKids === null) loadTree(treeDir || treeHome);
+  else renderNewList();
+};
+let newLaunching = false;   // 連打で二重に起動しない
+$("new-list").onclick = async (e) => {
+  const it = e.target.closest(".nitem");
+  if (!it || newLaunching) return;
+  // data-dir は「そこへ潜る」、data-cwd は「そこで起動する」
+  if (it.dataset.dir) { loadTree(it.dataset.dir); return; }
+  newLaunching = true;
+  const cwd = it.dataset.cwd;
+  closeNewSheet();
+  try {
+    const r = await api("/api/new", { agent: newAgent, cwd });
+    // 端末が開けないと result ではなく error が返る。成功として扱わない
+    toast(r?.error ? t("m.launchFailed") : t("m.launched", { name: projName(cwd) }));
+  } catch {
+    toast(t("m.launchFailed"));
+  } finally { newLaunching = false; }
+};
 
 // セッションの終了。取り消せない操作なので、一度目のタップでは実行せず
 // 文言と色を変えて確認を求める(スマホは押し間違いが起きやすい)
@@ -528,6 +637,7 @@ loadConfig().then(c => {
   if (readOnly) {
     // 送信手段を出さない。押せるのに 403 になる状態が一番わかりにくい
     $("dsend").style.display = "none";
+    $("btn-new").style.display = "none";   // 新規起動も同じ理由で隠す
     $("conn").className = "readonly";
     $("conn").title = t("m.readOnly");
   }

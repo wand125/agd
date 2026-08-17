@@ -242,6 +242,33 @@
   .sheet-btn.danger.armed { background: var(--waiting); color: #fff; border-color: var(--waiting); }
   @keyframes sheetUp { from { transform: translateY(100%); } }
   @keyframes fadeIn { from { opacity: 0; } }
+  /* ---- 新規セッション。候補が多いので下から高めに出して中をスクロールさせる ---- */
+  #new-bg { position: fixed; inset: 0; background: rgba(1,4,9,.6); z-index: 45;
+            display: none; align-items: flex-end; }
+  #new-bg.on { display: flex; animation: fadeIn .15s ease-out; }
+  #new-sheet { width: 100%; max-height: 82vh; background: var(--panel);
+               border-top: 1px solid var(--border); border-radius: 14px 14px 0 0;
+               padding: 10px 12px calc(var(--safe-bottom) + 8px);
+               display: flex; flex-direction: column; min-height: 0;
+               animation: sheetUp .2s cubic-bezier(.2,.8,.2,1); }
+  #new-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 8px; }
+  #new-title { font-size: 15px; font-weight: 600; }
+  #new-agent { margin-left: auto; }
+  #new-tabs { display: flex; gap: 2px; background: #21262d; border-radius: 9px; padding: 2px; flex: none; }
+  .ntab { flex: 1; text-align: center; padding: 8px; font-size: 13px; color: var(--dim); border-radius: 7px; }
+  .ntab.on { background: var(--panel); color: var(--fg); }
+  #new-list { overflow-y: auto; -webkit-overflow-scrolling: touch; margin-top: 8px; min-height: 0; }
+  /* 起動先の候補。指で押しやすいよう縦を厚めに取る */
+  .nitem { display: flex; align-items: center; gap: 8px; padding: 12px 8px;
+           border-bottom: 1px solid var(--border); }
+  .nitem:active { background: #21262d; }
+  .nitem .np { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nitem .nsub { font-size: 11px; color: var(--dim); margin-left: auto; flex: none; }
+  /* 「ここで起動」は他の行(=潜るだけ)と役割が違うので色で分ける */
+  .nitem.here { color: var(--accent); font-weight: 600; position: sticky; top: 0;
+                background: var(--panel); border-bottom: 1px solid var(--accent); }
+  .nitem.up { color: var(--dim); }
+  #new-list .empty { padding: 20px; text-align: center; color: var(--dim); font-size: 13px; }
 
   .toast { animation: toastIn .18s ease-out;
            position: fixed; left: 50%; transform: translateX(-50%);
@@ -268,6 +295,9 @@
   <button class="hbtn" id="btn-f" aria-label="Filter">
     <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
   </button>
+  <button class="hbtn" id="btn-new" aria-label="New session">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
 </header>
 <div id="qwrap"><input id="q" data-i18n-ph="m.searchPh" placeholder="Filter" autocomplete="off"></div>
 <div id="filters"></div>
@@ -281,6 +311,24 @@
     <button class="sheet-btn" id="sheet-dup" data-i18n="m.launchDup">Duplicate</button>
     <button class="sheet-btn danger" id="sheet-kill" data-i18n="m.killSession">Close this session</button>
     <button class="sheet-btn cancel" id="sheet-cancel" data-i18n="m.cancel">Cancel</button>
+  </div>
+</div>
+
+<!-- 新規セッション。起動先をタブで選ぶ(プロジェクト / 既存セッション) -->
+<div id="new-bg">
+  <div id="new-sheet">
+    <div id="new-head">
+      <span id="new-title" data-i18n="m.new.title">New session</span>
+      <button class="chip" id="new-agent">claude</button>
+      <button class="hbtn" id="new-close" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="new-tabs">
+      <div class="ntab on" data-tab="tree" data-i18n="m.new.tabTree">Browse</div>
+      <div class="ntab" data-tab="proj" data-i18n="m.new.tabProj">Recent</div>
+    </div>
+    <div id="new-list"></div>
   </div>
 </div>
 

@@ -1803,13 +1803,20 @@ try {
       if (!q.startsWith("/")) return Response.json({ dirs: [], exists: false });
       let exists = false;
       try { exists = statSync(q).isDirectory(); } catch {}
+      // browse=1: q そのものの中身を名前順に返す(モバイルのディレクトリツリー用)。
+      // 既定は入力補完で、q の「親」を前方一致で絞る。件数上限も用途が違う
+      // (補完は候補を絞りたい / ツリーは辿りたいので多めに返す)
+      const browse = url.searchParams.get("browse") === "1" && exists;
       const cut = q.lastIndexOf("/");
-      const base = cut === 0 ? "/" : q.slice(0, cut);
-      const prefix = q.slice(cut + 1).toLowerCase();
+      const base = browse ? q : (cut === 0 ? "/" : q.slice(0, cut));
+      const prefix = browse ? "" : q.slice(cut + 1).toLowerCase();
+      const limit = browse ? 300 : 15;
       const dirs: string[] = [];
       try {
-        for (const name of readdirSync(base)) {
-          if (dirs.length >= 15) break;
+        const names = readdirSync(base);
+        if (browse) names.sort((a, b) => a.localeCompare(b));
+        for (const name of names) {
+          if (dirs.length >= limit) break;
           if (name.startsWith(".") && !prefix.startsWith(".")) continue;
           if (!name.toLowerCase().startsWith(prefix)) continue;
           const full = join(base, name);
