@@ -1044,6 +1044,12 @@ function keyPalette(e) {
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); newMoveSel(1); }
     else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); newMoveSel(-1); }
     else if (e.key === "i" || e.key === "/") { e.preventDefault(); $("new-cwd").focus(); }
+    // h/l でタブ切替(このパレット内では左右に動かす対象が他に無い)
+    else if (e.key === "h" || e.key === "l" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const other = newTab === "proj" ? "tree" : "proj";
+      $("new-tabs").querySelector(`.ntab[data-tab="${other}"]`)?.click();
+    }
     else if (e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
     else if (e.key === "Enter") launchFromPalette();
     else if (e.key === "Escape" || e.key === "q") closeNew();
@@ -1621,8 +1627,11 @@ function openNew() {
     newProjects = [...ageByCwd.entries()]
       .map(([cwd, ageS]) => ({ cwd, ageS }))
       .sort((a, b) => a.ageS - b.ageS);
+    // ホームは cwd の共通祖先として必ず候補に含まれる
+    if (!treeHome) treeHome = (projects ?? []).find(p => /^\/(Users|home)\/[^/]+$/.test(p)) ?? "";
+    if (!treeDir) treeDir = treeHome;
     renderNewList();
-  });
+  }).catch(() => {});
   // デフォルトはノーマルモード(候補先頭を選択)。入力するときは i または /
   $("new-cwd").blur();
 }
@@ -1634,7 +1643,43 @@ function isPathMode() {
   const q = $("new-cwd").value.trim();
   return q.startsWith("/") || q.startsWith("~");
 }
+// ---- 起動先タブ(履歴 / フォルダを辿る) ----
+// ツリーの行も newFiltered() が返す形に揃える。こうすると j/k・Enter などの
+// キー操作をタブごとに書き分けずに済む(dir を持つ行だけ「潜る」扱いにする)
+let newTab = "proj";
+let treeDir = "";
+let treeKids = null;   // null = 読み込み中
+let treeHome = "";
+
+async function loadTree(dir) {
+  treeDir = dir;
+  treeKids = null;
+  renderNewList();
+  try {
+    const { dirs } = await apiGet(`/api/dirs?browse=1&q=${encodeURIComponent(dir + "/")}`);
+    treeKids = dirs ?? [];
+  } catch { treeKids = []; }
+  newSel = 0;
+  renderNewList();
+}
+
+function treeRows() {
+  if (treeKids === null) return [];
+  const rows = [{ cwd: treeDir, ageS: Infinity, here: true }];   // ここで起動
+  if (treeDir && treeHome && treeDir !== treeHome) {
+    rows.push({ cwd: treeDir.slice(0, treeDir.lastIndexOf("/")) || "/", ageS: Infinity, dir: true, up: true });
+  }
+  // 絞り込み欄はツリーでも効かせる(候補が多いディレクトリで探しやすい)
+  const ql = $("new-cwd").value.trim().toLowerCase();
+  for (const d of treeKids) {
+    if (ql && !d.slice(d.lastIndexOf("/") + 1).toLowerCase().includes(ql)) continue;
+    rows.push({ cwd: d, ageS: Infinity, dir: true });
+  }
+  return rows;
+}
+
 function newFiltered() {
+  if (newTab === "tree") return treeRows();
   const q = $("new-cwd").value.trim();
   if (isPathMode()) {
     if (newDirCands.length) return newDirCands.map(d => ({ cwd: d, ageS: Infinity }));
@@ -1660,17 +1705,36 @@ async function fetchDirCands() {
 function renderNewList() {
   const list = newFiltered();
   if (newSel >= list.length) newSel = Math.max(0, list.length - 1);
-  $("new-list").innerHTML = list.map((p, i) => p.create ? `
-    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${escAttr(p.cwd)}" data-create="1">
+  if (newTab === "tree" && treeKids === null) {
+    $("new-list").innerHTML = `<div class="proj-row">${esc(t("m.loading"))}</div>`;
+    return;
+  }
+  $("new-list").innerHTML = list.map((p, i) => {
+    const sel = i === newSel ? "sel" : "";
+    if (p.create) return `
+    <div class="proj-row ${sel}" data-cwd="${escAttr(p.cwd)}" data-create="1">
       <span>${t("new.createDirLaunch", { path: esc(shortCwd(p.cwd)) })}</span>
-    </div>` : `
-    <div class="proj-row ${i === newSel ? "sel" : ""}" data-cwd="${escAttr(p.cwd)}">
+    </div>`;
+    if (p.here) return `
+    <div class="proj-row here ${sel}" data-cwd="${escAttr(p.cwd)}">
+      <span>${esc(t("m.new.launchHere", { name: projName(p.cwd) }))}</span>
+    </div>`;
+    if (p.dir) return `
+    <div class="proj-row ${p.up ? "up" : ""} ${sel}" data-dir="${escAttr(p.cwd)}">
+      <span>${p.up ? "↑ " + esc(shortCwd(p.cwd)) : "📁 " + esc(p.cwd.slice(p.cwd.lastIndexOf("/") + 1))}</span>
+    </div>`;
+    return `
+    <div class="proj-row ${sel}" data-cwd="${escAttr(p.cwd)}">
       <span class="proj-tag" style="background:${projColor(p.cwd)}">${esc(projName(p.cwd))}</span>
       <span>${esc(shortCwd(p.cwd))}</span>
       <span class="card-meta">${p.ageS === Infinity ? "" : fmtAge(p.ageS)}</span>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   [...$("new-list").children].forEach(row => {
-    row.onclick = () => launchNew(newAgent, row.dataset.cwd, row.dataset.create === "1");
+    // data-dir は「そこへ潜る」、data-cwd は「そこで起動する」
+    row.onclick = () => row.dataset.dir
+      ? loadTree(row.dataset.dir)
+      : launchNew(newAgent, row.dataset.cwd, row.dataset.create === "1");
   });
 }
 async function launchNew(agent, cwd, create = false) {
@@ -1730,6 +1794,17 @@ function toggleNewAgent() {
   newAgent = newAgent === "claude" ? "codex" : "claude";
   paintNewAgent();
 }
+$("new-tabs").onclick = (e) => {
+  const tb = e.target.closest(".ntab");
+  if (!tb || tb.dataset.tab === newTab) return;
+  newTab = tb.dataset.tab;
+  [...$("new-tabs").children].forEach(c => c.classList.toggle("on", c === tb));
+  newSel = 0;
+  // フォルダ側は初回だけ取りに行く。絞り込み欄は両タブで意味が変わるため空にする
+  $("new-cwd").value = "";
+  if (newTab === "tree" && treeKids === null) loadTree(treeDir || treeHome);
+  else renderNewList();
+};
 $("new-btn").onclick = openNew;
 // 片方を直接クリックしたときはそれを選ぶ。枠の余白を押したときは切り替え
 // (Tab キーの挙動と揃える)
@@ -1741,6 +1816,9 @@ $("new-agent-chip").onclick = (e) => {
 $("new-overlay").onclick = (e) => { if (e.target === $("new-overlay")) closeNew(); };
 $("new-cwd").oninput = () => {
   newSel = 0;
+  // フォルダタブでは入力は「いま開いている階層の絞り込み」。パス補完に
+  // 渡すと別物(絶対パスの入力)になってしまうので分ける
+  if (newTab === "tree") { renderNewList(); return; }
   if (isPathMode()) fetchDirCands();
   else { newDirCands = []; renderNewList(); }
 };
@@ -1748,6 +1826,8 @@ function launchFromPalette() {
   const typed = $("new-cwd").value.trim();
   // パス入力モードでもディレクトリ候補が選択されていればそれを優先
   const item = newFiltered()[newSel];
+  // ツリーのフォルダ行で ⏎ は「潜る」。起動は先頭の「ここで起動」で行う
+  if (item?.dir) { loadTree(item.cwd); return; }
   const cwd = item?.cwd ?? (isPathMode() ? typed : undefined);
   if (cwd) launchNew(newAgent, cwd, !!item?.create);
 }
