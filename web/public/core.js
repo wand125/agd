@@ -299,6 +299,18 @@ const canOperate = (s) => !!s && !!s.running && (!!s.tty || !!s.remote);
 const target = (s) => ({ tty: s?.tty ?? "", cardKey: s?.key ?? "" });
 
 // ---------------- API ----------------
+// GET 用。素の fetch は待ち時間に上限が無く、電波が切れかけていると
+// 応答も失敗も返らないまま止まる(「読み込み中」から進まなくなる)。
+// 呼び元は例外として受け取り、それぞれの表示に落とす
+async function apiGet(path, timeoutMs = 15000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(path, { signal: ac.signal });
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
 async function api(path, body, timeoutMs = 15000) {
   // 応答が返らないまま待ち続けると、送信中フラグが解除されず操作不能になる。
   // 必ず上限を設けて中断する(呼び元は例外として受け取る)
@@ -314,8 +326,9 @@ async function api(path, body, timeoutMs = 15000) {
 }
 async function fetchTranscript(s, params = {}) {
   const q = new URLSearchParams({ agent: s.agent, sid: s.sid, ...params });
-  const r = await fetch(`/api/transcript?${q}`);
-  return r.json();
+  // 詳細画面は3秒ごとにこれを呼ぶ。上限が無いと、電波が細いときに応答待ちの
+  // リクエストが積み上がって復帰後にまとめて流れ込む
+  return apiGet(`/api/transcript?${q}`);
 }
 // セッションへの操作。ビューはこれを呼ぶだけでよい(ローカル/リモートの差は core が吸収)
 const sendText = (s, text) => api("/api/send", { ...target(s), text });
@@ -366,6 +379,23 @@ function answerPrompt(s, n) {
 // ---------------- WebSocket ----------------
 // 再接続と資産バージョン監視は共通。受け取った内容の見せ方だけがビューの仕事。
 let reconnectTimer = null;
+let retryDelay = 2000;    // 失敗が続くほど間隔を伸ばす(下の retry 参照)
+let aliveTimer = null;    // 受信途絶の監視
+
+// サーバーは POLL_MS(2.5秒)ごとに必ずスナップショットを送る。つまり
+// 一定時間なにも来ない = 経路が死んでいる、と判断してよい。
+// モバイル回線やトンネル経由だと FIN が届かず onclose が飛ばないまま
+// 「繋がっているつもり」で古い画面を見続けることがあるため、
+// 受信が途絶えたら自分から張り直す
+const ALIVE_MS = 15000;
+function bumpAlive(ws) {
+  clearTimeout(aliveTimer);
+  aliveTimer = setTimeout(() => {
+    // close を呼べば onclose 経由で切断表示と再接続に入る
+    try { ws.close(); } catch {}
+  }, ALIVE_MS);
+}
+
 function connect() {
   // 多重接続を避ける。onclose と onerror の両方から呼ばれても1本に収束させる
   clearTimeout(reconnectTimer);
@@ -373,8 +403,11 @@ function connect() {
   let ws;
   try { ws = new WebSocket(`ws://${location.host}/ws`); }
   catch { return retry(); }
+  bumpAlive(ws);
 
   ws.onmessage = (ev) => {
+    bumpAlive(ws);            // 何か届いている限り生きているとみなす
+    retryDelay = 2000;        // 繋がったので間隔を戻す
     let msg;
     // 壊れたフレームで更新が止まらないよう、パース失敗はその1件だけ捨てる
     try { msg = JSON.parse(ev.data); } catch { return; }
@@ -392,11 +425,32 @@ function connect() {
   };
   // onerror だけが飛んで onclose が来ない環境もあるため両方から再接続する
   ws.onerror = () => { try { ws.close(); } catch {} };
-  ws.onclose = () => { agd.onDisconnect?.(); retry(); };
+  ws.onclose = () => { clearTimeout(aliveTimer); agd.onDisconnect?.(); retry(); };
 }
 function retry() {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(connect, 2000);
+  // サーバーが落ちている間ずっと2秒間隔で叩き続けると、端末のバッテリーと
+  // 回線を無駄に使う。指数的に伸ばし、上限は30秒(復帰の待ち時間として許容できる範囲)
+  reconnectTimer = setTimeout(connect, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+  // 画面に戻ってきた/回線が復活したときは、待たずにすぐ試す
+  scheduleImmediateRetry();
+}
+
+// visibilitychange と online は「今なら繋がる可能性が高い」合図。
+// バックオフの待機中でも即座に張り直す(スマホでアプリを開き直したとき、
+// 最大30秒画面が固まったままになるのを防ぐ)
+let immediateHooked = false;
+function scheduleImmediateRetry() {
+  if (immediateHooked) return;
+  immediateHooked = true;
+  const kick = () => {
+    if (document.hidden) return;
+    retryDelay = 2000;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; connect(); }
+  };
+  addEventListener("visibilitychange", kick);
+  addEventListener("online", kick);
 }
 
 // 起動時の設定取得(パス短縮の接頭辞など)

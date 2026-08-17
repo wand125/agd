@@ -292,7 +292,7 @@ function openNewSheet() {
   paintNewAgent();
   renderNewList();
   // 候補は開くたびに取り直す(新しく使った場所を反映するため)
-  fetch("/api/projects").then(r => r.json()).then(({ projects }) => {
+  apiGet("/api/projects").then(({ projects }) => {
     newProjects = projects ?? [];
     // ホームは /api/projects の先頭に入っている(cwd の共通祖先として必ず含まれる)
     if (!treeHome) treeHome = (projects ?? []).find(p => /^\/(Users|home)\/[^/]+$/.test(p)) ?? "";
@@ -309,10 +309,9 @@ async function loadTree(dir) {
   treeKids = null;                 // 読み込み中
   renderNewList();
   try {
-    const r = await fetch(`/api/dirs?browse=1&q=${encodeURIComponent(dir + "/")}`);
-    const { dirs } = await r.json();
+    const { dirs } = await apiGet(`/api/dirs?browse=1&q=${encodeURIComponent(dir + "/")}`);
     treeKids = dirs ?? [];
-  } catch { treeKids = []; }
+  } catch { treeKids = []; }   // 失敗時は空表示(読み込み中のまま固まらせない)
   renderNewList();
 }
 
@@ -554,7 +553,9 @@ let logSeq = 0;
 let logOpen = new Set();   // 詳細で開いているログエントリ(index)
 async function loadLog(s, force = false) {
   const seq = ++logSeq;
-  const d = await fetchTranscript(s, { limit: 60 });
+  // 通信断は次の周期で取り直す。表示は前回のまま残す(空になると驚くため)
+  let d;
+  try { d = await fetchTranscript(s, { limit: 60 }); } catch { return; }
   if (seq !== logSeq || openKey !== s.key) return;   // 切替中の上書きを防ぐ
   const el = $("dlog");
   const stick = force || atBottom();

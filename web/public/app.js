@@ -1409,9 +1409,14 @@ $("d-sub").onchange = async () => {
 let logSeq = 0;  // 読み込み世代。古い応答が新しい表示を上書きするレースを防ぐ
 async function loadLog(s, force) {
   const seq = ++logSeq;
-  const data = force
-    ? await fetchTranscript(s)                          // 末尾300件
-    : await fetchTranscript(s, { from: logStart });     // 読み込み済み範囲以降を更新
+  // 3秒ごとに呼ばれる。通信断で例外が出ても次の回で取り直せばよいので、
+  // ここで握って表示は前回のまま据え置く(消すと画面が空になって驚く)
+  let data;
+  try {
+    data = force
+      ? await fetchTranscript(s)                        // 末尾300件
+      : await fetchTranscript(s, { from: logStart });   // 読み込み済み範囲以降を更新
+  } catch { return; }
   if (seq !== logSeq) return;  // この取得中に別セッション/サブへ切り替わった → 破棄
   if (!force && data.entries.length === logEntries.length && data.total === logTotal) return;
   if (force) logStart = data.start;
@@ -1426,7 +1431,10 @@ async function loadOlder() {
   const log = $("detail-log");
   const prevHeight = log.scrollHeight;
   const seq = ++logSeq;
-  const data = await fetchTranscript(s, { before: logStart });
+  // ユーザーが押して起きる操作なので、黙って無反応にせず知らせる
+  let data;
+  try { data = await fetchTranscript(s, { before: logStart }); }
+  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
   if (seq !== logSeq) return;
   const added = data.entries.length;
   logEntries = [...data.entries, ...logEntries];
@@ -1462,7 +1470,9 @@ function renderLog(force) {
       ev.stopPropagation();
       const s = sessionOf(detailKey);
       if (!s) return;
-      const { entry } = await fetchTranscript(s, { entry: logStart + i });
+      let entry;
+      try { ({ entry } = await fetchTranscript(s, { entry: logStart + i })); }
+      catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
       if (entry) {
         const me = isMasked() ? { ...entry, text: maskText(entry.text) } : entry;
         const pre = el.querySelector("pre");
@@ -1534,9 +1544,15 @@ async function runSearch(q) {
   $("search-overlay").classList.add("show");
   $("search-q").textContent = q;
   $("search-results").textContent = t("search.searching");
-  const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const { hits, indexing } = await r.json();
-  if (!hits.length) { $("search-results").textContent = t("search.noHits"); return; }
+  // 通信が切れると「検索中…」のまま止まっていた(唯一 catch が無かった)
+  let hits, indexing;
+  try {
+    ({ hits, indexing } = await apiGet(`/api/search?q=${encodeURIComponent(q)}`));
+  } catch (e) {
+    $("search-results").textContent = t("toast.sendFailed", { err: String(e?.message ?? e) });
+    return;
+  }
+  if (!hits?.length) { $("search-results").textContent = t("search.noHits"); return; }
   $("search-results").innerHTML = "";
   if (indexing) {
     const note = document.createElement('div');
@@ -1586,7 +1602,7 @@ function openNew() {
     if (!s.cwd) return;
     ageByCwd.set(s.cwd, Math.min(ageByCwd.get(s.cwd) ?? Infinity, s.ageS));
   });
-  fetch("/api/projects").then(r => r.json()).then(({ projects }) => {
+  apiGet("/api/projects").then(({ projects }) => {
     projects.forEach(p => { if (!ageByCwd.has(p)) ageByCwd.set(p, Infinity); });
     newProjects = [...ageByCwd.entries()]
       .map(([cwd, ageS]) => ({ cwd, ageS }))
@@ -1619,7 +1635,7 @@ async function fetchDirCands() {
   const q = $("new-cwd").value.trim();
   const seq = ++dirFetchSeq;
   try {
-    const r = await fetch(`/api/dirs?q=${encodeURIComponent(q)}`);
+    const r = await apiGet(`/api/dirs?q=${encodeURIComponent(q)}`);
     const { dirs, exists } = await r.json();
     if (seq !== dirFetchSeq) return;  // 入力が進んでいたら破棄
     newDirCands = dirs;
