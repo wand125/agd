@@ -9,7 +9,7 @@ import {
   type PromptInfo, type TmuxPane,
 } from "./screen";
 import {
-  remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing,
+  remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing, remoteNew,
   syncRemoteTranscript, remoteSelectPane,
   type RemoteHost,
 } from "./remote";
@@ -1747,9 +1747,18 @@ try {
       return Response.json({ result: r });
     }
     if (req.method === "POST" && url.pathname === "/api/new") {
-      const { agent, cwd, create } = await req.json();
+      const { agent, cwd, create, cardKey } = await req.json();
       const abs = String(cwd ?? "").replace(/^~(?=\/|$)/, HOME);
       if (!abs.startsWith("/")) return Response.json({ error: "invalid cwd" }, { status: 400 });
+      // リモートセッションの複製は、そのホスト側で起こす。
+      // ここでローカルの存在確認にかけると /mnt/c/... のような
+      // リモートにしか無いパスが必ず invalid cwd になる
+      const rmNew = remoteOf(String(cardKey ?? ""));
+      if (rmNew) {
+        const rr = await remoteNew(rmNew.h, agent === "codex" ? "codex" : "claude", abs);
+        if (rr.startsWith("error")) return Response.json({ error: rr.replace(/^error:\s*/, "") }, { status: 400 });
+        return Response.json({ result: rr });
+      }
       if (!existsSync(abs)) {
         if (!create) return Response.json({ error: "invalid cwd" }, { status: 400 });
         try { mkdirSync(abs, { recursive: true }); } catch (e: any) {

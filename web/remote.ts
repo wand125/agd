@@ -211,6 +211,28 @@ export async function remoteClose(h: RemoteHost, paneId: string): Promise<string
   return "ok(remote)";
 }
 
+// リモートで新しいセッションを起こす。
+//
+// 母艦の /api/new は cwd をローカルの存在確認にかけるため、リモートの
+// セッションを複製しようとすると必ず invalid cwd になっていた
+// (/mnt/c/... は WSL 側にしかパスが無い)。起動先のホストで完結させる。
+//
+// detached の tmux セッションとして起こす。リモートには GUI が無く、
+// そもそも agd が扱っているのは tmux セッションなのでこれで一覧に載る。
+export async function remoteNew(h: RemoteHost, agent: string, cwd: string): Promise<string> {
+  const bin = agent === "codex" ? "codex" : "claude";
+  const name = `agd-${Math.floor(Date.now() / 1000).toString(36)}`;
+  // 存在確認はリモート側で行う。ここを省くと、打ち間違えたパスでも
+  // tmux セッションだけができて中身が即死する(原因が分かりにくい)
+  const script =
+    `test -d ${q(cwd)} || { echo "no such dir"; exit 3; }; ` +
+    `tmux new-session -d -s ${q(name)} -c ${q(cwd)} ${q(`${bin}; exec $SHELL`)} && echo ok`;
+  const out = (await shRemote(h, script, 15000)).trim();
+  if (out.endsWith("ok")) return `ok(remote:${name})`;
+  if (out.includes("no such dir")) return `error: ${cwd} が ${h.host} に存在しません`;
+  return `error: ${out || "起動できませんでした"}`;
+}
+
 // ---- トランスクリプト ----
 // リモートのログはリモート側にしかないので、ローカルへ取り寄せてキャッシュする。
 // 毎回全部を転送しないよう、サイズが増えた分だけ追記する(tail -c +N)。

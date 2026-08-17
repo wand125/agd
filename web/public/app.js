@@ -1742,13 +1742,15 @@ function renderNewList() {
       : launchNew(newAgent, row.dataset.cwd, row.dataset.create === "1");
   });
 }
-async function launchNew(agent, cwd, create = false) {
+// cardKey を渡すと、そのセッションのホスト側で起こす(リモートの複製用)。
+// 省略すれば従来どおり母艦で起動する
+async function launchNew(agent, cwd, create = false, cardKey = "") {
   if (!cwd || newLaunchBusy) return;
   newLaunchBusy = true;
   // 例外で抜けるとフラグが立ちっぱなしになり、以後の起動が全て無視される
   let r;
   try {
-    r = await api("/api/new", { agent, cwd, create });
+    r = await api("/api/new", { agent, cwd, create, cardKey });
   } catch (e) {
     toastError(t("toast.launchFailed", { err: String(e?.message ?? e) }));
     return;
@@ -1766,7 +1768,8 @@ async function launchNew(agent, cwd, create = false) {
 function duplicateSession(key) {
   const s = sessionOf(key);
   if (!s?.cwd) { toast(t("toast.noCardSelected")); return; }
-  launchNew(s.agent, s.cwd);
+  // リモートのセッションはそのホスト側で複製する(cwd は母艦に存在しない)
+  launchNew(s.agent, s.cwd, false, s.remote ? s.key : "");
 }
 // Ctrl+C: 選択セッションの会話を resume で引き継いで新タブ起動(claude/codex 両対応)
 async function resumeContinue(key) {
