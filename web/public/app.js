@@ -1044,13 +1044,15 @@ function keyPalette(e) {
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); newMoveSel(1); }
     else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); newMoveSel(-1); }
     else if (e.key === "i" || e.key === "/") { e.preventDefault(); $("new-cwd").focus(); }
-    // h/l でタブ切替(このパレット内では左右に動かす対象が他に無い)
-    else if (e.key === "h" || e.key === "l" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    // t = タブ切替(使用履歴 ⇄ フォルダ)。h/l と ←/→ も同義で残す
+    else if (e.key === "t" || e.key === "h" || e.key === "l"
+             || e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       const other = newTab === "proj" ? "tree" : "proj";
       $("new-tabs").querySelector(`.ntab[data-tab="${other}"]`)?.click();
     }
-    else if (e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
+    // a = エージェント切替(claude ⇄ codex)。Tab も従来どおり効く
+    else if (e.key === "a" || e.key === "Tab") { e.preventDefault(); toggleNewAgent(); }
     else if (e.key === "Enter") launchFromPalette();
     else if (e.key === "Escape" || e.key === "q") closeNew();
     return true;

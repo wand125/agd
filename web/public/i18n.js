@@ -113,7 +113,7 @@ const STRINGS = {
     // ---- new session palette ----
     "new.title": "New session",
     "new.agentSwitch": "Tab to switch",
-    "new.hint": "<kbd>j/k</kbd>select <kbd>h/l</kbd>tab <kbd>i</kbd>filter <kbd>Tab</kbd>agent <kbd>⏎</kbd>launch <kbd>q</kbd>close",
+    "new.hint": "<kbd>j/k</kbd>select <kbd>t</kbd>tab <kbd>a</kbd>agent <kbd>i</kbd>filter <kbd>⏎</kbd>launch <kbd>q</kbd>close",
     "new.placeholder": "Search a project, or type an absolute path",
     "new.createDir": "Directory does not exist. Press ⏎ again to create it.",
     "new.createDirLaunch": "📁 Create directory and launch: {path}",
@@ -361,7 +361,7 @@ const STRINGS = {
     // ---- new session palette ----
     "new.title": "新規セッション",
     "new.agentSwitch": "Tabで切替",
-    "new.hint": "<kbd>j/k</kbd>選択 <kbd>h/l</kbd>タブ <kbd>i</kbd>絞込 <kbd>Tab</kbd>エージェント <kbd>⏎</kbd>起動 <kbd>q</kbd>閉",
+    "new.hint": "<kbd>j/k</kbd>選択 <kbd>t</kbd>タブ <kbd>a</kbd>エージェント <kbd>i</kbd>絞込 <kbd>⏎</kbd>起動 <kbd>q</kbd>閉",
     "new.placeholder": "プロジェクトを検索、または絶対パスを入力",
     "new.createDir": "ディレクトリが存在しません。もう一度 ⏎ で作成します。",
     "new.createDirLaunch": "📁 ディレクトリを作成して起動: {path}",
