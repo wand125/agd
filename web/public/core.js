@@ -330,6 +330,18 @@ async function fetchTranscript(s, params = {}) {
   // リクエストが積み上がって復帰後にまとめて流れ込む
   return apiGet(`/api/transcript?${q}`);
 }
+// 送信系の応答を判定する。失敗の返り方が2通りあるため、呼び元ごとに
+// 書くと片方を取りこぼす:
+//   {result:"error: …"}  … 端末へは届いたが送れなかった(HTTP 200)
+//   {error:"…"}          … リクエストが弾かれた(400 など)
+// 後者を見ていないと「送信に失敗: undefined」という中身の無い表示になる
+function sendFailure(r) {
+  if (r?.error) return String(r.error);
+  const res = String(r?.result ?? "");
+  if (res.startsWith("ok")) return null;          // 成功
+  return res || "no response";                    // result が空のときも失敗として扱う
+}
+
 // セッションへの操作。ビューはこれを呼ぶだけでよい(ローカル/リモートの差は core が吸収)
 const sendText = (s, text) => api("/api/send", { ...target(s), text });
 const sendKey = (s, key) => api("/api/key", { ...target(s), key });

@@ -558,17 +558,24 @@ function curSelKey() {
 async function sendNamedKey(k, label) {
   const s = sessionOf(curSelKey());
   if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
-  const r = await api("/api/key", { ...target(s), key: k });
-  if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: label, name: s.name }));
-  else toast(t("toast.sendFailed", { err: r.result }));
+  let r;
+  try { r = await api("/api/key", { ...target(s), key: k }); }
+  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  const err = sendFailure(r);
+  if (!err) toast(t("toast.sentTo", { action: label, name: s.name }));
+  else toast(t("toast.sendFailed", { err }));
 }
 // 選択セッションへテキスト送信(スラッシュコマンド用)
 async function sendTextToSelected(text) {
   const s = sessionOf(curSelKey());
   if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
-  const r = await api("/api/send", { ...target(s), text });
-  if ((r.result || "").startsWith("ok")) toast(t("toast.sentTo", { action: text, name: s.name }));
-  else toast(t("toast.sendFailed", { err: r.result }));
+  // 通信断で例外になる経路が抜けていた(唯一 try が無かった)
+  let r;
+  try { r = await api("/api/send", { ...target(s), text }); }
+  catch (e) { toast(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  const err = sendFailure(r);
+  if (!err) toast(t("toast.sentTo", { action: text, name: s.name }));
+  else toast(t("toast.sendFailed", { err }));
 }
 async function runCommand(c) {
   if (c === "q") {
@@ -818,8 +825,9 @@ function renderPromptBar(bar, s) {
         toast(t("toast.sendFailed", { err: String(err?.message ?? err) }));
         return;
       } finally { b.disabled = false; }
-      if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
-      else toast(t("toast.sendFailed", { err: r.result }));
+      const err = sendFailure(r);
+      if (!err) toast(t("toast.sent"));
+      else toast(t("toast.sendFailed", { err }));
     };
   });
 }
@@ -855,8 +863,12 @@ async function confirmEnter(key) {
   confirmBusy = true;
   try {
     const r = await api("/api/key", { ...target(s), key: "Enter" });
-    if ((r.result || "").startsWith("ok")) toast(t("toast.enterSent"));
-    else toast(t("toast.sendFailed", { err: r.result }));
+    const err = sendFailure(r);
+    if (!err) toast(t("toast.enterSent"));
+    else toast(t("toast.sendFailed", { err }));
+  } catch (e) {
+    // 通信断。finally でフラグは戻るが、例外自体は握らないと未処理のまま
+    toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
   } finally { confirmBusy = false; }
 }
 
@@ -919,8 +931,9 @@ async function sendTo(key, input) {
     toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { delete input.dataset.busy; }
-  if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
-  else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err: r.result })); }  // 失敗時は復元
+  const err = sendFailure(r);
+  if (!err) toast(t("toast.sent"));
+  else { input.value = text; autoGrow(input, 140); toast(t("toast.sendFailed", { err })); }  // 失敗時は復元
 }
 
 
@@ -1515,8 +1528,9 @@ async function sendDetail() {
     toast(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
   } finally { detailSendBusy = false; }
-  if ((r.result || "").startsWith("ok")) toast(t("toast.sent"));
-  else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err: r.result })); }
+  const err = sendFailure(r);
+  if (!err) toast(t("toast.sent"));
+  else { $("d-input").value = text; autoGrow($("d-input"), 200); toast(t("toast.sendFailed", { err })); }
 }
 $("d-input").oninput = () => { updateSlashHints($("d-input"), () => sessionOf(detailKey)); autoGrow($("d-input"), 200); };
 $("d-input").onkeydown = (e) => {

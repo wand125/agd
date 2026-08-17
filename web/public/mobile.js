@@ -126,7 +126,10 @@ async function answer(s, n) {
     const isConfirm = n === "enter";
     const multi = !!s.prompt?.multiSelect;
     const r = isConfirm ? await sendKey(s, "Enter") : await answerPrompt(s, Number(n));
-    if (!r) { toast(t("m.answerFailed")); return; }
+    // r が null なのは「待機中でない/範囲外」。加えてサーバー側で送れなかった
+    // 場合({result:"error: …"})もある。後者を見ていないと、届いていないのに
+    // 「送信しました」と出してプロンプトまで畳んでしまっていた
+    if (!r || sendFailure(r)) { toast(t("m.answerFailed")); return; }
     toast(t("m.sent"));
     // 複数選択はチェックを重ねてから確定するので、確定するまで畳んではいけない。
     // 畳むと2つ目以降にチェックを付けられなくなる
@@ -592,11 +595,15 @@ async function send() {
   if (!s || !text) return;
   if (!canOperate(s)) { toast(t("m.notRunning")); return; }
   $("dinput").value = "";
-  const r = await sendText(s, text);
-  const ok = (r.result || "").startsWith("ok");
-  if (ok) saveDraft(s.key, "");
+  // 通信断で例外が出ると、入力を消したあとで throw して打った内容が消えていた。
+  // 電波の悪い場所ほど起きるので、失敗はすべて「本文を戻す」に集約する
+  let r;
+  try { r = await sendText(s, text); }
+  catch { $("dinput").value = text; saveDraft(s.key, text); toast(t("m.sendFailed")); return; }
+  const err = sendFailure(r);
+  if (!err) saveDraft(s.key, "");
   else { $("dinput").value = text; saveDraft(s.key, text); }   // 失敗時は打ち直させない
-  toast(t(ok ? "m.sent" : "m.sendFailed"));
+  toast(t(err ? "m.sendFailed" : "m.sent"));
 }
 $("dsendbtn").onclick = send;
 $("dinput").oninput = () => saveDraft(openKey, $("dinput").value.trim());
