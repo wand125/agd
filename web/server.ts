@@ -901,7 +901,13 @@ function wrapTmux(inner: string, name = nextTmuxName()): string {
 async function openDetachedTmux(inner: string): Promise<string> {
   if (!hasTmux()) return "error: tmux が無いため端末を開けません";
   const name = nextTmuxName();
-  const r = await runCommand([tmuxBin(), "new-session", "-d", "-s", name, `${inner}; exec $SHELL`]);
+  // -d で作ると tmux は default-size(既定 80x24)を使う。TUI はその幅で
+  // 描画するため、あとから広い端末で attach しても入力欄が画面外に出たままになる
+  // (実測: 80x24 のまま追従しない)。作成時に広めに取り、window-size latest で
+  // 以後は attach したクライアントに合わせる
+  const r = await runCommand([tmuxBin(), "new-session", "-d", "-s", name,
+    "-x", "200", "-y", "50", `${inner}; exec $SHELL`]);
+  await sh([tmuxBin(), "set-option", "-t", name, "window-size", "latest"]);
   if (r.err.trim()) return "error: " + r.err.trim().split("\n")[0].slice(0, 200);
   return `ok(tmux:${name})`;
 }

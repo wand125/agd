@@ -226,7 +226,10 @@ async function remoteLaunch(h: RemoteHost, cwd: string, cmd: string): Promise<st
   const name = `agd-${Math.floor(Date.now() / 1000).toString(36)}`;
   const script =
     `test -d ${q(cwd)} || { echo "no such dir"; exit 3; }; ` +
-    `tmux new-session -d -s ${q(name)} -c ${q(cwd)} ${q(`${cmd}; exec $SHELL`)} && echo ok`;
+    // -d は default-size(既定 80x24)で作られ、後から広い端末で attach しても
+    // 追従しない。作成時に広めに取り、window-size latest でクライアントに合わせる
+    `tmux new-session -d -s ${q(name)} -c ${q(cwd)} -x 200 -y 50 ${q(`${cmd}; exec $SHELL`)} && ` +
+    `tmux set-option -t ${q(name)} window-size latest 2>/dev/null; echo ok`;
   const out = (await shRemote(h, script, 15000)).trim();
   if (out.endsWith("ok")) return `ok(remote:${name})`;
   if (out.includes("no such dir")) return `error: ${cwd} が ${h.host} に存在しません`;
