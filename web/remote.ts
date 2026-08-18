@@ -219,18 +219,33 @@ export async function remoteClose(h: RemoteHost, paneId: string): Promise<string
 //
 // detached の tmux セッションとして起こす。リモートには GUI が無く、
 // そもそも agd が扱っているのは tmux セッションなのでこれで一覧に載る。
-export async function remoteNew(h: RemoteHost, agent: string, cwd: string): Promise<string> {
-  const bin = agent === "codex" ? "codex" : "claude";
+// リモートで detached の tmux セッションを起こす共通処理。
+// 存在確認はリモート側で行う。ここを省くと、打ち間違えたパスでも
+// tmux セッションだけができて中身が即死する(原因が分かりにくい)
+async function remoteLaunch(h: RemoteHost, cwd: string, cmd: string): Promise<string> {
   const name = `agd-${Math.floor(Date.now() / 1000).toString(36)}`;
-  // 存在確認はリモート側で行う。ここを省くと、打ち間違えたパスでも
-  // tmux セッションだけができて中身が即死する(原因が分かりにくい)
   const script =
     `test -d ${q(cwd)} || { echo "no such dir"; exit 3; }; ` +
-    `tmux new-session -d -s ${q(name)} -c ${q(cwd)} ${q(`${bin}; exec $SHELL`)} && echo ok`;
+    `tmux new-session -d -s ${q(name)} -c ${q(cwd)} ${q(`${cmd}; exec $SHELL`)} && echo ok`;
   const out = (await shRemote(h, script, 15000)).trim();
   if (out.endsWith("ok")) return `ok(remote:${name})`;
   if (out.includes("no such dir")) return `error: ${cwd} が ${h.host} に存在しません`;
   return `error: ${out || "起動できませんでした"}`;
+}
+
+export async function remoteNew(h: RemoteHost, agent: string, cwd: string): Promise<string> {
+  return remoteLaunch(h, cwd, agent === "codex" ? "codex" : "claude");
+}
+
+// 会話を引き継いで別セッションとして分岐する(母艦の openResume と同じ考え方)。
+// 素の resume だと両プロセスが同一トランスクリプトに追記して交錯するため、
+// 実行中セッションの複製では必ず fork する
+export async function remoteResume(h: RemoteHost, agent: string, sid: string,
+                                   cwd: string, fork = false): Promise<string> {
+  const cmd = agent === "claude"
+    ? `claude --resume ${q(sid)}${fork ? " --fork-session" : ""}`
+    : `codex ${fork ? "fork" : "resume"} ${q(sid)}`;
+  return remoteLaunch(h, cwd, cmd);
 }
 
 // ---- トランスクリプト ----

@@ -1794,7 +1794,11 @@ async function resumeContinue(key) {
   // 応答を捨てると、端末が開けなかったときも成功したように見えてしまう
   let r;
   try {
-    r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
+    // リモートのセッションはそのホスト側で fork する(cwd は母艦に存在しない)
+    r = await api("/api/resume", {
+      agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true,
+      cardKey: s.remote ? s.key : "",
+    });
   } catch (e) {
     toastError(t("toast.launchFailed", { err: String(e?.message ?? e) }));
     return;

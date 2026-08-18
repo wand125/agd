@@ -267,8 +267,10 @@ async function launchFrom(key, dup) {
   closeSheet();
   let r;
   try {
-    if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true });
-    else r = await api("/api/new", { agent: s.agent, cwd: s.cwd });
+    // リモートのセッションはそのホスト側で fork/起動する(cwd は母艦に存在しない)
+    const cardKey = s.remote ? s.key : "";
+    if (dup && s.sid) r = await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd, fork: true, cardKey });
+    else r = await api("/api/new", { agent: s.agent, cwd: s.cwd, cardKey });
   } catch { toastError(t("m.launchFailed")); return; }
   // 端末を開けなかった場合はサーバーが error を返す(result は無い)
   toast(!r?.error && (r.result || "").startsWith("ok")

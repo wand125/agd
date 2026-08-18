@@ -9,7 +9,7 @@ import {
   type PromptInfo, type TmuxPane,
 } from "./screen";
 import {
-  remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing, remoteNew,
+  remoteSessions, remoteCapture, remoteSend, remoteKey, remoteClose, remotePing, remoteNew, remoteResume,
   syncRemoteTranscript, remoteSelectPane,
   type RemoteHost,
 } from "./remote";
@@ -1930,10 +1930,20 @@ try {
       return Response.json({ result: await openRemoteAttach(h, String(tmuxSession)) });
     }
     if (req.method === "POST" && url.pathname === "/api/resume") {
-      const { agent, sid, cwd, fork } = await req.json();
+      const { agent, sid, cwd, fork, cardKey } = await req.json();
       // 実行中セッションの複製はクライアント指定に関わらず必ず fork する
       // (素の resume だと同一トランスクリプトに追記されログが交錯するため)
-      const isRunning = lastSnapshot.sessions.some(s => s.running && s.sid === sid);
+      const isRunning = lastSnapshot.sessions.some(s => s.running && s.sid === sid)
+        || remoteCacheList().some(s => s.running && s.sid === sid);
+      // /api/new と同じ理由でリモートは起動先のホストへ委譲する。
+      // cwd は母艦に存在せず、仮に存在しても母艦で起動してしまうため
+      const rmRes = remoteOf(String(cardKey ?? ""));
+      if (rmRes) {
+        const rr = await remoteResume(rmRes.h, agent === "codex" ? "codex" : "claude",
+                                      String(sid ?? ""), String(cwd ?? ""), !!fork || isRunning);
+        if (rr.startsWith("error")) return Response.json({ error: rr.replace(/^error:\s*/, "") }, { status: 400 });
+        return Response.json({ result: rr });
+      }
       const r = await openResume(agent, sid, cwd, !!fork || isRunning);
       if (r.startsWith("error")) return Response.json({ error: r.replace(/^error:\s*/, "") }, { status: 500 });
       return Response.json({ result: r });
