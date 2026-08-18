@@ -13,40 +13,58 @@ import { join } from "node:path";
 // 純粋関数なのでソースから関数定義だけ抜き出して評価する。
 function loadAttachCmd(): (info: Record<string, string>) => string {
   const src = readFileSync(join(import.meta.dir, "..", "web", "public", "app.js"), "utf8");
-  const start = src.indexOf("function attachCmd(");
-  expect(start).toBeGreaterThan(-1);
-  // 関数の終わりは行頭の "}"(この関数はトップレベル定義なのでインデント無し)
-  const end = src.indexOf("\n}", start);
-  expect(end).toBeGreaterThan(start);
-  const body = src.slice(start, end + 2);
+  // attachCmd は viewCmd を呼ぶので、両方を取り出して評価する
+  const grab = (name: string) => {
+    const start = src.indexOf(`function ${name}(`);
+    expect(start).toBeGreaterThan(-1);
+    // 関数の終わりは行頭の "}"(いずれもトップレベル定義なのでインデント無し)
+    const end = src.indexOf("\n}", start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end + 2);
+  };
+  const body = `${grab("viewCmd")}\n${grab("attachCmd")}`;
   return new Function(`${body}; return attachCmd;`)() as (i: Record<string, string>) => string;
 }
 
 describe("attach コマンドの組み立て", () => {
   const attachCmd = loadAttachCmd();
 
-  test("母艦のペインはウィンドウとペインの両方を選んでから attach する", () => {
+  // 素の attach -t <session> は使わない。既に誰かが attach していると
+  // tmux は全クライアントで同じウィンドウを共有するため、新しく開いたつもりが
+  // 既存ウィンドウと同じ画面になり、しかも select-window が元のクライアントの
+  // 表示まで切り替えてしまう(「開かない・別のチャットが出る」として実際に踏んだ)
+  test("専用ビューを作ってから目的のウィンドウを選ぶ", () => {
     const cmd = attachCmd({ host: "m4", tmuxTarget: "work:3.0" });
-    // attach だけだと「最後に見ていたウィンドウ」が開いて目的のペインに着かない
-    expect(cmd).toContain("select-window -t work:3.0");
-    // select-window だけではウィンドウ内の active ペインが変わらない(実測で確認)
+    // -t でグループ化した別セッションを作る。-A で既存があれば繋ぎ直す
+    expect(cmd).toContain("new-session -A -t work -s work-view");
+    // ウィンドウ選択はビュー側に対して行う(元のクライアントを動かさない)
+    expect(cmd).toContain("select-window -t work-view:3");
+    // ペインはウィンドウ内の位置なので元の target のまま
     expect(cmd).toContain("select-pane -t work:3.0");
-    // attach の対象はセッション名。target をそのまま渡すと attach は受け付けない
-    expect(cmd).toContain("attach -t work");
-    expect(cmd).not.toContain("attach -t work:3.0");
+  });
+
+  test("既存クライアントを奪う attach -t <session> を使わない", () => {
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "work:3.0" });
+    expect(cmd).not.toMatch(/attach -t work(?!-view)/);
+  });
+
+  test("select-window にはウィンドウ番号だけを渡す", () => {
+    // "3.0" でも tmux は通すが、ウィンドウ指定にペイン番号が混ざるのは紛らわしい
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "work:3.0" });
+    expect(cmd).not.toContain("select-window -t work-view:3.0");
   });
 
   test("tmux は絶対パスで呼ぶ(非対話 ssh は PATH が細い)", () => {
     // ssh の非対話実行は /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin
     // だけになる。素の "tmux" だと command not found で終わる(Neo で実測)
     const cmd = attachCmd({ host: "m4", tmuxTarget: "work:3.0", tmuxBin: "/opt/homebrew/bin/tmux" });
-    expect(cmd).toContain("'/opt/homebrew/bin/tmux select-window");
-    expect(cmd).not.toContain("'tmux select-window");
+    expect(cmd).toContain("'/opt/homebrew/bin/tmux new-session");
+    expect(cmd).not.toContain("'tmux new-session");
   });
 
   test("tmux の場所が分からなければ素の tmux に落とす", () => {
     // PATH が通っている環境なら動く。undefined を埋め込むよりまし
-    expect(attachCmd({ host: "m4", tmuxTarget: "work:3.0" })).toContain("'tmux select-window");
+    expect(attachCmd({ host: "m4", tmuxTarget: "work:3.0" })).toContain("'tmux new-session");
   });
 
   test("tmux のコマンド区切りはリモートシェルに \\; として届く", () => {

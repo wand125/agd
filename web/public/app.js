@@ -968,27 +968,35 @@ function openAttach(info) {
   $("attach-overlay").classList.add("show");
   $("attach-go").focus();
 }
+// 目的のウィンドウを開くための tmux コマンド。
+//
+// 素の `attach -t <session>` は使わない。既に誰かが attach していると
+// tmux は全クライアントで同じウィンドウを共有するため、
+//   - 新しく開いたつもりが既存ウィンドウと同じ画面になる
+//   - select-window が元のクライアントの表示まで切り替えてしまう
+// という「開かない・別のチャットが出る」状態になる(実測)。
+//
+// -t でセッションをグループ化した専用ビューを作れば、ウィンドウ群を
+// 共有したまま「どのウィンドウを見るか」だけを独立して持てる。
+// 同名ビューが残っていても -A で繋ぎ直すので増え続けない。
+function viewCmd(tm, target) {
+  const sess = target.split(":")[0];
+  const view = `${sess}-view`;
+  return `${tm} new-session -A -t ${sess} -s ${view} \\; `
+    // ウィンドウ番号だけを渡す("8.0" でも通るが意味が曖昧になる)
+    + `select-window -t ${view}:${(target.split(":")[1] ?? "0").split(".")[0]} \\; `
+    + `select-pane -t ${target}`;
+}
+
 function attachCmd(info) {
   // 母艦の tmux で動いているセッション。同じマシンなので ssh は要らない
-  if (info.localTmux) {
-    const sess = info.localTmux.split(":")[0];
-    const tm = info.tmuxBin || "tmux";
-    return `${tm} select-window -t ${info.localTmux} \\; select-pane -t ${info.localTmux} \\; attach -t ${sess}`;
-  }
+  if (info.localTmux) return viewCmd(info.tmuxBin || "tmux", info.localTmux);
   // リモートホストのカードは従来どおりセッション名だけを持つ
   if (info.tmuxSession) return `ssh ${info.host} -t 'tmux attach -t ${info.tmuxSession}'`;
-  // 母艦のカードは "work:3.0" 形式のペイン位置を持つ。attach だけだと最後に見ていた
-  // ウィンドウが開くので、目的の位置へ移してから attach する。
-  // select-window だけではウィンドウ内の active ペインが変わらない(実測)ため
-  // select-pane も必ず併せて送る
-  if (info.tmuxTarget) {
-    const sess = info.tmuxTarget.split(":")[0];
-    // ssh の非対話実行は /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin
-    // だけになる。素の "tmux" では command not found になるので絶対パスで呼ぶ(実測)
-    const tm = info.tmuxBin || "tmux";
-    return `ssh ${info.host} -t '${tm} select-window -t ${info.tmuxTarget} \\; `
-      + `select-pane -t ${info.tmuxTarget} \\; attach -t ${sess}'`;
-  }
+  // 母艦のカードは "work:3.0" 形式のペイン位置を持つ。
+  // ssh の非対話実行は /etc/zprofile を読まず PATH が /usr/bin:/bin:/usr/sbin:/sbin
+  // だけになる。素の "tmux" では command not found になるので絶対パスで呼ぶ(実測)
+  if (info.tmuxTarget) return `ssh ${info.host} -t '${viewCmd(info.tmuxBin || "tmux", info.tmuxTarget)}'`;
   // tmux の外で動いているセッション。手元から辿る手段が無いので ssh だけ渡す
   return `ssh ${info.host}`;
 }
