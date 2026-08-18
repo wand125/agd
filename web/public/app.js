@@ -652,12 +652,27 @@ async function runCommand(c) {
 }
 
 let resumeBusy = false;
+// キーからの再開。停止中のときだけ動かす。
+// 実行中のセッションに resume を投げると同じ会話に2つ目のプロセスが付き、
+// トランスクリプトが交錯する(会話を引き継いで別セッションを立てたい場合は
+// Ctrl+C の fork を使う)
+function resumeSelected(key) {
+  const s = sessionOf(key);
+  if (!s) { toastError(t("toast.noCardSelected")); return; }
+  if (s.running) { toast(t("toast.alreadyRunning")); return; }
+  resumeSession(s);
+}
+
 async function resumeSession(s) {
   if (!s || resumeBusy) return;
   resumeBusy = true;
   // 例外で抜けるとフラグが立ちっぱなしになり、以後の再開が全て無視される
   try {
-    await api("/api/resume", { agent: s.agent, sid: s.sid, cwd: s.cwd });
+    // リモートのセッションはそのホスト側で再開する(cwd は母艦に存在しない)
+    await api("/api/resume", {
+      agent: s.agent, sid: s.sid, cwd: s.cwd,
+      cardKey: s.remote ? s.key : "",
+    });
   } catch (e) {
     toastError(t("toast.sendFailed", { err: String(e?.message ?? e) }));
     return;
@@ -1140,6 +1155,7 @@ function keySplit(e) {
     // 入力欄に文字として入る心配は無い(グローバルの keydown が INPUT/TEXTAREA/
     // SELECT を除外している)。Ctrl+N は既存の複製なので明示的に外す
     if (e.key === "n" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openNew(); return true; }
+    if (e.key === "r" && listKey) { e.preventDefault(); resumeSelected(listKey); return true; }
     if (splitPane === "list") {
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel(idx < 0 ? 0 : idx + 1); return true; }
       if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel(idx < 0 ? 0 : idx - 1); return true; }
@@ -1191,6 +1207,7 @@ function keyDetail(e) {
     else if (e.ctrlKey && (e.key === "n" || e.key === "N") && detailKey) { e.preventDefault(); duplicateSession(detailKey); }
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey) { e.preventDefault(); resumeContinue(detailKey); }
     else if (e.key === "f" && detailKey) jump(detailKey);
+    else if (e.key === "r" && detailKey) { e.preventDefault(); resumeSelected(detailKey); }
     else if (e.key === "s" && detailKey) sendNamedKey("Escape", t("action.interrupt"));
     else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", t("action.mode"));
     else if (e.key === ":") { e.preventDefault(); openCmdline(); }
@@ -1242,6 +1259,7 @@ function keyList(e) {
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && s) { e.preventDefault(); resumeContinue(listKey); }
     else if (/^[1-9]$/.test(e.key) && s?.running) answerPromptByNumber(listKey, Number(e.key));
     else if (e.key === "p" && s) togglePin(listKey);
+    else if (e.key === "r" && s) { e.preventDefault(); resumeSelected(listKey); }
     else if (e.key === "n") { e.preventDefault(); openNew(); }
     else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
     return true;
@@ -1320,6 +1338,8 @@ function keyGrid(e) {
   else if (e.key === "m" && kbdKey) sendNamedKey("ShiftTab", t("action.mode"));
   else if (e.key === "s" && kbdKey) sendNamedKey("Escape", t("action.interrupt"));
   else if (e.key === "p" && kbdKey) togglePin(kbdKey);
+  // r = 停止中のセッションを再開する(実行中なら何もしない)
+  else if (e.key === "r" && sel) { e.preventDefault(); resumeSelected(kbdKey); }
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
   else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
   return false;
