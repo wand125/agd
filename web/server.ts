@@ -1915,7 +1915,11 @@ try {
         return Response.json({ result: await focusTty(localTty) });
       }
       const r = await focusTty(tty);
-      return Response.json({ result: r });
+      // 前面に出せなかった理由を返す。tmux の detached セッション(agd が
+      // ヘッドレス時に起こしたもの)には対応する iTerm タブが無いため、
+      // 「別マシンから見ている」と区別が付かず、UI が誤った案内を出していた
+      const localTmux = r.startsWith("ok") ? "" : (tmuxTargetByTty.get(String(tty ?? "")) ?? "");
+      return Response.json({ result: r, localTmux });
     }
     if (req.method === "POST" && url.pathname === "/api/remote-attach") {
       const { host, tmuxSession } = await req.json();

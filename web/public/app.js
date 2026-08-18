@@ -891,11 +891,18 @@ async function jump(key) {
   // ブラウザのホスト名では判定できない。Neo からは ssh のポートフォワード経由で
   // localhost:8787 を開いており、母艦のブラウザと見分けが付かないため。
   // 実際に focus を投げて結果を見るのが確実で、母艦に GUI が戻れば自動で元に戻る
-  if (!(r.result || "").startsWith("ok"))
-    openAttach({
-      host: sshHost(), tmuxTarget: s.tmuxTarget || "",
-      tmuxBin: window.agdTmuxBin || "tmux", copyOnly: true,
-    });
+  if ((r.result || "").startsWith("ok")) return;
+  // 母艦の tmux(detached)で動いているセッション。iTerm のタブが無いので
+  // focus は必ず失敗するが、これは「別マシンから見ている」のとは別の話。
+  // 手元で attach すれば済むので、ssh 無しのコマンドを出す
+  if (r.localTmux) {
+    openAttach({ localTmux: r.localTmux, tmuxBin: window.agdTmuxBin || "tmux", copyOnly: true });
+    return;
+  }
+  openAttach({
+    host: sshHost(), tmuxTarget: s.tmuxTarget || "",
+    tmuxBin: window.agdTmuxBin || "tmux", copyOnly: true,
+  });
 }
 // attach 先のホスト名。ポートフォワード越しだと localhost になってしまうので、
 // その場合はサーバーが自分のホスト名を教えてくれるまで m4 を既定にする
@@ -945,11 +952,13 @@ let attachInfo = null;
 function openAttach(info) {
   // ssh 先が分からないまま貼れるコマンドを出すと、手元のマシン自身に ssh して
   // しまう。動かないコマンドを渡すより、なぜ出せないかを伝える方がよい
-  if (info.copyOnly && !info.host) { toast(t("attach.noHost")); return; }
+  if (info.copyOnly && !info.host && !info.localTmux) { toastError(t("attach.noHost")); return; }
   attachInfo = info;
-  $("attach-msg").innerHTML = info.copyOnly
-    ? t("attach.copyBody", { host: esc(info.host) })
-    : t("attach.body", { host: esc(info.host) });
+  $("attach-msg").innerHTML = info.localTmux
+    ? t("attach.localTmuxBody", { session: esc(info.localTmux.split(":")[0]) })
+    : info.copyOnly
+      ? t("attach.copyBody", { host: esc(info.host) })
+      : t("attach.body", { host: esc(info.host) });
   $("attach-cmd").textContent = attachCmd(info);
   // data-i18n-html ごと差し替える。innerHTML だけ書き換えると言語切替のたびに
   // applyI18n が元のキーで上書きしてラベルがモードと食い違う
@@ -960,6 +969,12 @@ function openAttach(info) {
   $("attach-go").focus();
 }
 function attachCmd(info) {
+  // 母艦の tmux で動いているセッション。同じマシンなので ssh は要らない
+  if (info.localTmux) {
+    const sess = info.localTmux.split(":")[0];
+    const tm = info.tmuxBin || "tmux";
+    return `${tm} select-window -t ${info.localTmux} \\; select-pane -t ${info.localTmux} \\; attach -t ${sess}`;
+  }
   // リモートホストのカードは従来どおりセッション名だけを持つ
   if (info.tmuxSession) return `ssh ${info.host} -t 'tmux attach -t ${info.tmuxSession}'`;
   // 母艦のカードは "work:3.0" 形式のペイン位置を持つ。attach だけだと最後に見ていた
