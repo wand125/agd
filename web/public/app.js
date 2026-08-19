@@ -1081,6 +1081,12 @@ function keyPalette(e) {
     // パレットのノーマルモード(入力欄から Esc で抜けた状態): vim キーで操作
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); newMoveSel(1); }
     else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); newMoveSel(-1); }
+    // 一覧系のビューと同じ移動キーを揃える。候補が数十件あるフォルダタブでは
+    // j/k だけだと端まで行くのに時間がかかる
+    else if (e.key === "g") { e.preventDefault(); newSetSel(0); }
+    else if (e.key === "G") { e.preventDefault(); newSetSel(Infinity); }
+    else if (e.key === "d") { e.preventDefault(); newMoveSel(5); }
+    else if (e.key === "u") { e.preventDefault(); newMoveSel(-5); }
     else if (e.key === "i" || e.key === "/") { e.preventDefault(); $("new-cwd").focus(); }
     // t = タブ切替(使用履歴 ⇄ フォルダ)。h/l と ←/→ も同義で残す
     else if (e.key === "t" || e.key === "h" || e.key === "l"
@@ -1901,6 +1907,14 @@ function launchFromPalette() {
   const cwd = item?.cwd ?? (isPathMode() ? typed : undefined);
   if (cwd) launchNew(newAgent, cwd, !!item?.create);
 }
+// 位置を直接指定する(g/G 用)。Infinity を渡せば末尾に着く
+function newSetSel(i) {
+  const list = newFiltered();
+  newSel = Math.max(0, Math.min(i, list.length - 1));
+  renderNewList();
+  document.querySelector("#new-list .proj-row.sel")?.scrollIntoView({ block: "nearest" });
+}
+
 function newMoveSel(d) {
   const list = newFiltered();
   newSel = Math.max(0, Math.min(newSel + d, list.length - 1));
