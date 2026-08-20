@@ -555,6 +555,21 @@ function curSelKey() {
   return activeTab === "list" ? listKey : kbdKey;
 }
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
+// 名前付きキー(サーバーの NAMED_KEYS と揃える)。これ以外は文字として送られる
+const NAMED_KEY_LIST = ["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab", "Space"];
+
+// :key の実体。任意のキー列を選択中のセッションへ送る
+async function sendKeySeq(keys) {
+  const s = sessionOf(curSelKey());
+  if (!canOperate(s)) { toastError(t("toast.selectRunning")); return; }
+  let r;
+  try { r = await api("/api/key", { ...target(s), keys }); }
+  catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  const err = sendFailure(r);
+  if (!err) toast(t("toast.sentTo", { action: keys.join(" "), name: s.name }));
+  else toastError(t("toast.sendFailed", { err }));
+}
+
 async function sendNamedKey(k, label) {
   const s = sessionOf(curSelKey());
   if (!canOperate(s)) { toast(t("toast.selectRunning")); return; }
@@ -620,10 +635,18 @@ async function runCommand(c) {
   } else if (c === "mode") {
     sendNamedKey("ShiftTab", t("action.mode"));
   } else if (c.startsWith("key ")) {
-    const k = c.slice(4).trim();
-    const valid = ["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab"];
-    if (valid.includes(k)) sendNamedKey(k, k);
-    else toast(t("toast.invalidKey", { key: k, valid: valid.join(" ") }));
+    // TUI が想定外の操作を求めてきたときの抜け道。
+    // ボタン化できるのは agd が形を知っている選択肢だけなので、
+    // 「見えているが押せない」ものに手が届く手段を1つ残しておく。
+    //
+    // 空白区切りで複数キーを順に送る:
+    //   :key n              → n を1文字打つ(Notes など)
+    //   :key Down Down Enter → カーソルを2つ送って確定
+    // 名前付き(Enter/Escape/Up/Down/Left/Right/Tab/ShiftTab/Space)は
+    // その扱いで、それ以外は文字としてそのまま打つ(サーバー側で分岐)
+    const keys = c.slice(4).trim().split(/\s+/).filter(Boolean);
+    if (keys.length) sendKeySeq(keys);
+    else toastError(t("toast.invalidKey", { key: "", valid: NAMED_KEY_LIST.join(" ") }));
   } else if (c === "lang" || c.startsWith("lang ")) {
     const next = c.slice(4).trim();
     if (next === "en" || next === "ja") {
