@@ -1473,14 +1473,25 @@ function fixZombieBusy(running: Session[]) {
 function applyPrompts(running: Session[], screens: Map<string, string>) {
   for (const s of running) {
     const p = detectPrompt(screens.get(s.tty));
-    // AskUserQuestion はトランスクリプトに構造化されて残るため、そちらを正とする。
-    // ただし採用は「画面にも選択プロンプトが出ている」ときだけ。転記だけを根拠に
-    // すると、応答直後でまだ tool_result が書かれていない一瞬に、待機していない
-    // セッションへボタンを出してしまう
+    // AskUserQuestion はトランスクリプトに構造化されて残る。ラベルが幅で切れず、
+    // 横並びパネルの文字も混ざらず、description と multiSelect まで取れるので、
+    // 取れた場合は常にこちらを正とする。
+    //
+    // ただし「画面にも選択プロンプトが出ている」ことは条件に残す。転記だけを
+    // 根拠にすると、応答直後でまだ tool_result が書かれていない一瞬に、待機して
+    // いないセッションへボタンを出してしまう(実際に踏んだ)。
     const ask = s.agent === "claude" && p?.options.length ? askPromptForSid(s.sid) : null;
-    // 選択の実行はキー送信なので、カーソル位置だけは画面の値を使う
-    const merged = ask && ask.options.length === p!.options.length
-      ? { ...ask, cursorIndex: p!.cursorIndex ?? 0 } : (ask ?? p);
+    // 選択の実行はキー送信なので、カーソル位置だけは画面の値を使う。
+    //
+    // 画面がスクロールしていたり幅が狭いと、見えている選択肢が転記より少ない
+    // ことがある。以前は件数一致を条件にしていたため、その場合に転記を捨てて
+    // 幅切れしたラベルを使っていた。件数がずれてもラベルは転記が正しいので採る。
+    // ただしカーソル位置は「画面に見えている範囲での位置」なので、転記の件数に
+    // 対して外れることがある。範囲外なら先頭に倒す(誤った行を選ぶより安全)
+    const cursor = p?.cursorIndex ?? 0;
+    const merged = ask
+      ? { ...ask, cursorIndex: cursor < ask.options.length ? cursor : 0 }
+      : p;
     if (!merged) continue;
     s.prompt = merged;
     // 誤検出防止: waiting への昇格は「番号付き選択肢」または「codexのカーソル選択」のみ

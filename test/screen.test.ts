@@ -259,3 +259,43 @@ describe("detectAskPrompt", () => {
     expect(detectAskPrompt(["{AskUserQuestion 壊れてる", ask("t1", q1)])?.options.length).toBe(2);
   });
 });
+
+// 画面と転記で選択肢の数がずれることがある(画面がスクロールしていたり、
+// 幅が狭くて末尾が見えていない場合)。以前は件数一致を条件に転記を採用して
+// いたため、ずれた瞬間だけ幅で切れたラベルに戻っていた。
+// applyPrompts の合流規則をここで固定する(server.ts は import すると
+// サーバーが起動するため、同じ式を書き写して検証する)。
+describe("画面と転記の合流", () => {
+  const merge = (p: any, ask: any) => {
+    const cursor = p?.cursorIndex ?? 0;
+    return ask ? { ...ask, cursorIndex: cursor < ask.options.length ? cursor : 0 } : p;
+  };
+  const opts = (n: number, pre: string) =>
+    Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: `${pre}${i + 1}` }));
+
+  test("件数がずれても転記のラベルを使う", () => {
+    const p = { options: opts(3, "画面"), cursorIndex: 1 };
+    const ask = { options: opts(4, "転記"), source: "transcript" };
+    const m = merge(p, ask);
+    expect(m.source).toBe("transcript");
+    expect(m.options).toHaveLength(4);
+    expect(m.options[0].label).toBe("転記1");
+  });
+
+  test("カーソル位置は画面の値を引き継ぐ", () => {
+    const m = merge({ options: opts(4, "画面"), cursorIndex: 2 }, { options: opts(4, "転記") });
+    expect(m.cursorIndex).toBe(2);
+  });
+
+  // 画面に見えている位置が転記の件数を超えることがある。
+  // そのまま使うと存在しない行を選びに行ってしまう
+  test("カーソルが転記の範囲外なら先頭に倒す", () => {
+    const m = merge({ options: opts(5, "画面"), cursorIndex: 4 }, { options: opts(3, "転記") });
+    expect(m.cursorIndex).toBe(0);
+  });
+
+  test("転記が取れなければ画面のものを使う", () => {
+    const p = { options: opts(3, "画面"), cursorIndex: 1 };
+    expect(merge(p, null)).toBe(p);
+  });
+});
