@@ -513,6 +513,80 @@ function startItermHelper(retryMs = 5000) {
 startItermHelper();
 
 const ITERM_SCREEN_PREFIX = "__AGD_SCREEN__";
+// ---- Terminal.app(標準ターミナル)対応 ----
+// 検出は claude agents + ps なのでターミナルの種類を問わないが、画面取得と
+// 操作は iTerm2 の AppleScript に依存しており、Terminal.app のセッションは
+// 「一覧には出るが中身が見えず操作もできない」状態だった。
+//
+// tmux の中で動いていれば種類を問わず完全に扱えるので、そちらが本筋
+// (README 参照)。これは tmux を使わない場合の受け皿。
+//
+// contents は「いま見えている範囲」で、シェルが待機中だと空になる。
+// history はスクロールバックを含み中身が取れる(実測)ので history を使う。
+const TERMINAL_CAPTURE_SCRIPT = `
+on run argv
+  set target to item 1 of argv
+  with timeout of 2 seconds
+    tell application "Terminal"
+      repeat with w in windows
+        repeat with i from 1 to (count of tabs of w)
+          if (tty of (tab i of w)) is target then
+            return "${ITERM_SCREEN_PREFIX}" & (history of (tab i of w))
+          end if
+        end repeat
+      end repeat
+    end tell
+  end timeout
+  return ""
+end run`;
+
+// Terminal.app へ文字を送る。iTerm の "write text" に相当するのは
+// do script … in tab で、これは既存タブの標準入力に一行流し込む。
+//
+// System Events の keystroke でも送れるが、osascript にアクセシビリティ権限が
+// 無いと 1002 で拒否される(このマシンで実測)。do script は権限不要で通るので
+// そちらを使う。ただし「一行を流す」ものなので、名前付きキー(Escape/Up など)は
+// 送れない。キー操作が要る場合は tmux 内で動かす必要がある
+const TERMINAL_WRITE_SCRIPT = `
+on run argv
+  set target to item 1 of argv
+  set body to item 2 of argv
+  with timeout of 2 seconds
+    tell application "Terminal"
+      repeat with w in windows
+        repeat with i from 1 to (count of tabs of w)
+          if (tty of (tab i of w)) is target then
+            do script body in (tab i of w)
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end tell
+  end timeout
+  return "not found"
+end run`;
+
+// フォーカス(前面に出す)
+const TERMINAL_FOCUS_SCRIPT = `
+on run argv
+  set target to item 1 of argv
+  with timeout of 2 seconds
+    tell application "Terminal"
+      repeat with w in windows
+        repeat with i from 1 to (count of tabs of w)
+          if (tty of (tab i of w)) is target then
+            set selected tab of w to (tab i of w)
+            set index of w to 1
+            activate
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end tell
+  end timeout
+  return "not found"
+end run`;
+
 const ITERM_CAPTURE_SCRIPT = `
 on run argv
   set target to item 1 of argv
@@ -581,7 +655,10 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   for (const t of itermNeed) {
     if (result.has(t)) continue;
     const cached = itermScreens.get(t);
-    if (cached && Date.now() - cached.at < 15_000) result.set(t, cached.text);
+    // 空の値は入れない。iTerm に無い tty(Terminal.app など)もヘルパーは
+    // 空文字で返すため、そのまま入れると「取得済み」とみなされて
+    // 後段の Terminal.app フォールバックに落ちない
+    if (cached && cached.text && Date.now() - cached.at < 15_000) result.set(t, cached.text);
   }
   // AppleScript 取得はヘルパーが死んでいるときだけのフォールバック。
   // ヘルパー稼働中に毎サイクル併走させると iTerm2 の Apple Events が渋滞し、
@@ -598,6 +675,15 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
       if (r.out.startsWith(ITERM_SCREEN_PREFIX))
         result.set(tty, r.out.slice(ITERM_SCREEN_PREFIX.length).trimEnd());
     }
+  }
+  // iTerm でも tmux でもない tty は Terminal.app を当たる。
+  // ここまでで取れているものは触らないので、iTerm 利用時のコストは増えない
+  for (const tty of itermNeed) {
+    if (result.has(tty)) continue;
+    const r = await osascriptResult(TERMINAL_CAPTURE_SCRIPT, [`/dev/${tty}`]);
+    if (r.timedOut) { markTtyStalled(tty); continue; }
+    if (r.out.startsWith(ITERM_SCREEN_PREFIX))
+      result.set(tty, r.out.slice(ITERM_SCREEN_PREFIX.length).trimEnd());
   }
   return result;
 }
@@ -683,11 +769,20 @@ async function sendToTty(tty: string, text: string): Promise<string> {
     return "ok(tmux)";
   }
   const viaApi = await helperOp("send", { tty, text });
-  if (viaApi) return viaApi.ok ? "ok(api)" : "error: " + (viaApi.error ?? "helper");
+  // ヘルパーは iTerm のセッションしか知らないため、Terminal.app の tty には
+  // "session not found" を返す。ここで打ち切ると後段のフォールバックに
+  // 落ちないので、成功したときだけ返す
+  if (viaApi?.ok) return "ok(api)";
   if (isTtyStalled(tty)) return "error: timeout";
   const r = await shStrict(["osascript", "-", `/dev/${tty}`, "text", payload], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   if (r === "error: timeout") markTtyStalled(tty);
-  if (!r.startsWith("ok")) return r;
+  // iTerm に無ければ Terminal.app を当たる。do script は一行を流し込むので
+  // 本文と Enter を分ける必要がない(この時点で送信完了)
+  if (!r.startsWith("ok")) {
+    const term = await shStrict(["osascript", "-", `/dev/${tty}`, text], TERMINAL_WRITE_SCRIPT, OSASCRIPT_TIMEOUT_MS);
+    if (term.startsWith("ok")) return "ok(terminal)";
+    return r;
+  }
   await Bun.sleep(150);
   const enter = await shStrict(["osascript", "-", `/dev/${tty}`, "enter", ""], ITERM_KEY_SCRIPT, OSASCRIPT_TIMEOUT_MS);
   if (enter === "error: timeout") markTtyStalled(tty);
@@ -844,9 +939,11 @@ end run`;
 
 async function focusTty(tty: string): Promise<string> {
   const viaApi = await helperOp("focus", { tty });
-  if (viaApi) return viaApi.ok ? "ok(api)" : "not found";
-  const r = await sh(["osascript", "-", `/dev/${tty}`], ITERM_FOCUS_SCRIPT, OSASCRIPT_TIMEOUT_MS);
-  return r.trim();
+  if (viaApi && viaApi.ok) return "ok(api)";
+  const r = (await sh(["osascript", "-", `/dev/${tty}`], ITERM_FOCUS_SCRIPT, OSASCRIPT_TIMEOUT_MS)).trim();
+  if (r.startsWith("ok")) return r;
+  // iTerm に無ければ Terminal.app を当たる
+  return (await sh(["osascript", "-", `/dev/${tty}`], TERMINAL_FOCUS_SCRIPT, OSASCRIPT_TIMEOUT_MS)).trim() || "not found";
 }
 
 // 注意: activate は入れない(起動のたびにブラウザからフォーカスを奪わないため)。

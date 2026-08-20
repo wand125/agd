@@ -25,6 +25,10 @@ Everything works for sessions agd did not start — no wrapper process required.
 ## Requirements
 
 - macOS with [iTerm2](https://iterm2.com) (tmux panes inside iTerm2 also supported)
+  - **Other terminals** (Terminal.app, WezTerm, Ghostty…): run your agent **inside tmux** and
+    everything works — capture and control go through tmux, not the terminal app.
+    Terminal.app additionally works without tmux (screen capture and sending text),
+    but key presses such as Esc/arrows still require tmux.
 - [Bun](https://bun.sh)
 - [Claude Code](https://claude.com/claude-code) and/or [Codex CLI](https://developers.openai.com/codex/cli)
 - Optional:

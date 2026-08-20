@@ -25,6 +25,10 @@ agd は**既存のセッション**(素の iTerm2 タブや tmux ペインで普
 ## 動作要件
 
 - macOS + [iTerm2](https://iterm2.com)(iTerm2 内の tmux ペインも対応)
+  - **他のターミナル**(Terminal.app / WezTerm / Ghostty など): **tmux の中で**エージェントを
+    起動すれば全機能が使えます。画面取得も操作も tmux 経由で行うため、ターミナルの種類を問いません。
+    Terminal.app は tmux 無しでも画面取得と本文送信が可能ですが、Esc や矢印などの
+    キー操作には tmux が必要です。
 - [Bun](https://bun.sh)
 - [Claude Code](https://claude.com/claude-code) / [Codex CLI](https://developers.openai.com/codex/cli)
 - オプション:
