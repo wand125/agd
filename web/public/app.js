@@ -816,6 +816,10 @@ function renderPromptBar(bar, s) {
              <button class="btn" data-mode="key" data-key="y">y</button>
              <button class="btn" data-mode="key" data-key="n">n</button>`;
   }
+  // 選択肢以外の操作(Chat about this / Submit など)。転記には現れないので
+  // 画面から拾った keys をそのまま送る
+  for (const [i, x] of (p?.extras ?? []).entries())
+    html += `<button class="btn" data-mode="extra" data-extra="${i}" title="${escAttr(maskText(x.label))}">${esc(maskText(x.label.slice(0, 20)))}</button>`;
   bar.innerHTML = html;
   bar.querySelectorAll("button").forEach(b => {
     b.onclick = async (e) => {
@@ -827,6 +831,10 @@ function renderPromptBar(bar, s) {
       b.disabled = true;
       let r;
       try {
+        if (b.dataset.mode === "extra") {
+          const keys = p.extras?.[Number(b.dataset.extra)]?.keys ?? [];
+          r = await api("/api/key", { ...target(s), keys });
+        } else {
         const cursorStyle = b.dataset.mode === "cursor" ||
           (b.dataset.mode === "num" && s.agent === "codex");  // codexの番号付きはカーソル移動で選ぶ
         if (cursorStyle) {
@@ -835,6 +843,7 @@ function renderPromptBar(bar, s) {
           r = await api("/api/key", { ...target(s), keys });
         } else {
           r = await api("/api/key", { ...target(s), key: b.dataset.key });
+        }
         }
       } catch (err) {
         toastError(t("toast.sendFailed", { err: String(err?.message ?? err) }));

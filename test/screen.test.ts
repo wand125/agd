@@ -299,3 +299,50 @@ describe("画面と転記の合流", () => {
     expect(merge(p, null)).toBe(p);
   });
 });
+
+// 選択肢の下に並ぶ操作(Chat about this / Submit など)は AskUserQuestion の
+// トランスクリプトには現れない。転記を正にする実装では、ここを画面から
+// 別に拾わないとボタンごと消えてしまう。
+describe("選択肢以外の操作(extras)", () => {
+  const screen = (cursor: number) => [
+    "どちらで進めますか。",
+    "",
+    ...[1, 2, 3].map(n => `${cursor === n - 1 ? " ❯ " : "   "}${n}. 選択肢${n}`),
+    "",
+    "   Chat about this",
+    "",
+    "   Submit",
+    "",
+    " Enter to select · ↑/↓ to navigate",
+  ].join("\n");
+
+  test("選択肢の下の操作行を拾う", () => {
+    const p = detectPrompt(screen(2));
+    expect(p?.extras?.map(x => x.label)).toEqual(["Chat about this", "Submit"]);
+  });
+
+  test("選択肢そのものは extras に混ざらない", () => {
+    const p = detectPrompt(screen(0));
+    expect(p?.options).toHaveLength(3);
+    expect(p?.extras?.some(x => /選択肢/.test(x.label))).toBe(false);
+  });
+
+  // 番号キーでは選べないので、カーソルを送る回数を位置から計算する必要がある
+  test("押すキーはカーソル位置に応じて変わる", () => {
+    const down = (cursor: number, i: number) =>
+      detectPrompt(screen(cursor))!.extras![i].keys.filter(k => k === "Down").length;
+    expect(down(2, 0)).toBe(1);   // 最終選択肢にいる → 1つ下が Chat about this
+    expect(down(0, 0)).toBe(3);   // 先頭にいる → 2つ進んでさらに1つ下
+    expect(down(2, 1)).toBe(2);   // Submit はその次
+  });
+
+  test("最後は Enter で確定する", () => {
+    const keys = detectPrompt(screen(2))!.extras![0].keys;
+    expect(keys[keys.length - 1]).toBe("Enter");
+  });
+
+  test("操作行が無ければ空", () => {
+    const p = detectPrompt(["選ぶ?", " ❯ 1. A", "   2. B"].join("\n"));
+    expect(p?.extras ?? []).toEqual([]);
+  });
+});

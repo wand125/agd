@@ -83,7 +83,10 @@ function renderList() {
       ? `<div class="answers">${s.prompt.options.slice(0, 4).map((o, i) =>
           `<button class="abtn" data-k="${escAttr(s.key)}" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 24)}</button>`).join("")}${
           // 複数選択は数字がチェックの ON/OFF なので、確定用の Enter が別に要る
-          s.prompt.multiSelect ? `<button class="abtn confirm" data-k="${escAttr(s.key)}" data-a="enter">${esc(t("prompt.confirm"))}</button>` : ""}</div>`
+          s.prompt.multiSelect ? `<button class="abtn confirm" data-k="${escAttr(s.key)}" data-a="enter">${esc(t("prompt.confirm"))}</button>` : ""}${
+          // 選択肢以外の操作(Chat about this / Submit など)。転記には現れない
+          (s.prompt.extras ?? []).map((x, i) =>
+            `<button class="abtn" data-k="${escAttr(s.key)}" data-x="${i}">${esc(maskText(x.label)).slice(0, 20)}</button>`).join("")}</div>`
       : "";
     const isPinned = pinned.includes(s.key);
     return `<div class="row ${s.status}${isPinned ? " pinned" : ""}" data-k="${escAttr(s.key)}"
@@ -108,7 +111,7 @@ $("list").onclick = (e) => {
   if (btn) {                                  // 一覧から即応答
     e.stopPropagation();
     const s = sessionOf(btn.dataset.k);
-    if (s) answer(s, btn.dataset.a);
+    if (s) btn.dataset.x ? answerExtra(s, Number(btn.dataset.x)) : answer(s, btn.dataset.a);
     return;
   }
   const row = e.target.closest(".row");
@@ -118,6 +121,20 @@ $("list").onclick = (e) => {
 };
 
 let answering = false;   // 応答の多重送信を防ぐ
+
+// 選択肢以外の操作(Chat about this / Submit など)。押すキー列は
+// 画面の並びから組み立てられているので、そのまま送るだけでよい
+async function answerExtra(s, i) {
+  const keys = s.prompt?.extras?.[i]?.keys;
+  if (!keys?.length || answering) return;
+  answering = true;
+  try {
+    const r = await sendKeys(s, keys);
+    toast(t(sendFailure(r) ? "m.sendFailed" : "m.sent"));
+  } catch { toastError(t("m.sendFailed")); }
+  finally { answering = false; }
+}
+
 async function answer(s, n) {
   if (answering) return;
   answering = true;
@@ -483,13 +500,16 @@ function paintDetail(s, force = false) {
     $("dpa").innerHTML = p.options.map((o, i) =>
       `<button class="abtn" data-a="${i + 1}">${esc(maskText(o.label)).slice(0, 30)}</button>`).join("")
       // 複数選択は数字がチェックの ON/OFF なので、確定用の Enter が別に要る
-      + (p.multiSelect ? `<button class="abtn confirm" data-a="enter">${esc(t("prompt.confirm"))}</button>` : "");
+      + (p.multiSelect ? `<button class="abtn confirm" data-a="enter">${esc(t("prompt.confirm"))}</button>` : "")
+      + (p.extras ?? []).map((x, i) =>
+          `<button class="abtn" data-x="${i}">${esc(maskText(x.label)).slice(0, 20)}</button>`).join("");
   } else $("dprompt").classList.remove("on");
 }
 $("dpa").onclick = (e) => {
   const b = e.target.closest(".abtn");
   const s = sessionOf(openKey);
-  if (b && s) answer(s, b.dataset.a);
+  if (!b || !s) return;
+  b.dataset.x ? answerExtra(s, Number(b.dataset.x)) : answer(s, b.dataset.a);
 };
 
 // 詳細内のスワイプ操作。

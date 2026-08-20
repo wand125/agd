@@ -13,6 +13,10 @@ export type PromptInfo = {
   // カーソル位置だけは画面から補う必要がある
   source?: "screen" | "transcript";
   multiSelect?: boolean;
+  // 選択肢以外に画面へ出ている操作(Chat about this / Submit / Notes など)。
+  // これらはトランスクリプトに現れないため、転記を正にすると消えてしまう。
+  // 押すキーは画面の位置に依存するので、行番号ではなくキー列で持つ
+  extras?: { label: string; keys: string[] }[];
 };
 
 export type TmuxPane = { tty: string; paneId: string; target: string };
@@ -77,7 +81,11 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     return undefined;
   };
   if (opts.length >= 2 && hasCursor)
-    return { question: findQuestion(firstIdx), options: opts.slice(0, 8), kind: "numbered", cursorIndex: numCursorIdx };
+    return {
+      question: findQuestion(firstIdx), options: opts.slice(0, 8),
+      kind: "numbered", cursorIndex: numCursorIdx,
+      extras: detectExtras(lines, opts.length, numCursorIdx),
+    };
   // 設定フォーム(auto mode のセットアップ画面など)。行が「選択肢」ではなく
   // ウィジェット(◀ 値 ▶ / [✔] / [ ])を持つ設定項目で、上下に動いて個別に
   // 切り替えたうえで最後に Continue を押す。番号もカーソル選択も当たらないため
@@ -116,6 +124,36 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
     return { options: [] };
   }
   return null;
+}
+
+// 選択肢の下に並ぶ操作行(Chat about this / Submit など)。
+//
+// これらは AskUserQuestion のトランスクリプトには現れない。転記を正にすると
+// 消えてしまうため、画面からここだけを別に拾って持ち回る。
+//
+// 到達方法は「最終選択肢より下へカーソルを送って Enter」。番号キーでは選べない
+// ので、押すキー(Down×n → Enter)を組み立てて持つ。
+const EXTRA_LINE = /^(Chat about this|Submit|Confirm|Done|Cancel|チャットで相談|送信|確定|キャンセル)$/i;
+
+function detectExtras(lines: string[], optCount: number, cursorIdx: number): { label: string; keys: string[] }[] {
+  const out: { label: string; keys: string[] }[] = [];
+  // 番号付き選択肢の最後の行を探し、それより下だけを見る
+  const optRe = new RegExp(`^\\s*[${CURSOR}]?\\s*\\d+\\.\\s+\\S`);
+  let lastOpt = -1;
+  lines.forEach((l, i) => { if (optRe.test(l)) lastOpt = i; });
+  if (lastOpt < 0) return out;
+  // 見えている順に番号を振る。選択肢の次の行が1つ目の操作
+  let step = 0;
+  for (let i = lastOpt + 1; i < lines.length; i++) {
+    const t = (lines[i] ?? "").replace(CURSOR_HEAD, "").trim();
+    if (!t) continue;
+    if (!EXTRA_LINE.test(t)) continue;
+    step++;
+    // 現在のカーソル位置(選択肢の何番目か)から、その操作行まで下へ送る
+    const down = (optCount - 1 - cursorIdx) + step;
+    out.push({ label: t.slice(0, 40), keys: [...Array(down).fill("Down"), "Enter"] });
+  }
+  return out.slice(0, 4);
 }
 
 // ------------------------------------------------- トランスクリプト由来の選択肢

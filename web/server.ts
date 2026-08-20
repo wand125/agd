@@ -1488,9 +1488,11 @@ function applyPrompts(running: Session[], screens: Map<string, string>) {
     // 幅切れしたラベルを使っていた。件数がずれてもラベルは転記が正しいので採る。
     // ただしカーソル位置は「画面に見えている範囲での位置」なので、転記の件数に
     // 対して外れることがある。範囲外なら先頭に倒す(誤った行を選ぶより安全)
+    // extras(Chat about this / Submit など)は転記に現れないため、
+    // 転記を採用するときも画面側の値を引き継ぐ
     const cursor = p?.cursorIndex ?? 0;
     const merged = ask
-      ? { ...ask, cursorIndex: cursor < ask.options.length ? cursor : 0 }
+      ? { ...ask, cursorIndex: cursor < ask.options.length ? cursor : 0, extras: p?.extras }
       : p;
     if (!merged) continue;
     s.prompt = merged;
