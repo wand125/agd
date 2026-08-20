@@ -467,6 +467,12 @@ function toBottom() { const b = $("dbody"); b.scrollTop = b.scrollHeight; }
 
 function paintDetail(s, force = false) {
   const stick = force || atBottom();
+  // 入力待ちのときは ⏎ の意味が変わる(空欄なら「送信」ではなく「選択の確定」)。
+  // 固定文言のままだと、確定できることが画面から読み取れない。
+  // placeholder は言語切替で data-i18n-ph から再適用されるため属性ごと差し替える
+  const ph = s.status === "waiting" ? "m.sendPhWaiting" : "m.sendPh";
+  $("dinput").dataset.i18nPh = ph;
+  $("dinput").placeholder = t(ph);
   if (setScreen($("dscreen"), s.screen ?? t("m.screenUnavailable")) && stick) toBottom();
   if (force) toBottom();
   // 入力待ちなら応答ボタンを出す
@@ -591,11 +597,31 @@ async function loadLog(s, force = false) {
 }
 
 // ---------------- 送信 ----------------
+// 空欄 ⏎ = 選択の確定。誤爆を防ぐため入力待ちのときだけ送る
+let confirmBusy = false;
+async function confirmEnterMobile(s) {
+  if (confirmBusy) return;
+  if (s.status !== "waiting") { toast(t("m.notWaiting")); return; }
+  confirmBusy = true;
+  try {
+    const r = await sendKey(s, "Enter");
+    const err = sendFailure(r);
+    toast(t(err ? "m.sendFailed" : "m.sent"));
+  } catch {
+    toastError(t("m.sendFailed"));
+  } finally { confirmBusy = false; }
+}
+
 async function send() {
   const s = sessionOf(openKey);
   const text = $("dinput").value.trim();
-  if (!s || !text) return;
-  if (!canOperate(s)) { toast(t("m.notRunning")); return; }
+  if (!s) return;
+  if (!canOperate(s)) { toastError(t("m.notRunning")); return; }
+  // 空欄のまま送ったときは素の ⏎ を送る(PC版と同じ)。
+  // 選択待ちのプロンプトを確定する手段がこれで、複数選択でチェックを
+  // 付けたあとの確定もここを通る。何も起きずに黙って戻ると、
+  // 「確定できない」ように見えてしまう
+  if (!text) { confirmEnterMobile(s); return; }
   $("dinput").value = "";
   // 通信断で例外が出ると、入力を消したあとで throw して打った内容が消えていた。
   // 電波の悪い場所ほど起きるので、失敗はすべて「本文を戻す」に集約する

@@ -33,6 +33,7 @@ const STRINGS = {
     "m.sendFailed": "Failed to send",
     "m.answerFailed": "Could not answer",
     "m.notRunning": "This session is not running",
+    "m.notWaiting": "Not waiting for input; ⏎ was not sent",
     "m.needsInput": "▲ {name} needs input",
     "m.pinned": "📌 {name}",
     "m.unpinned": "Unpinned: {name}",
@@ -46,6 +47,7 @@ const STRINGS = {
     "m.tab.log": "Log",
     "m.searchPh": "Filter",
     "m.sendPh": "Send…",
+    "m.sendPhWaiting": "Empty + send to confirm",
     "m.send": "Send",
     // ---- header ----
     "tab.grid": "Screens",
@@ -284,6 +286,7 @@ const STRINGS = {
     "m.sendFailed": "送信に失敗しました",
     "m.answerFailed": "応答できませんでした",
     "m.notRunning": "実行中のセッションではありません",
+    "m.notWaiting": "入力待ちではないため ⏎ は送信しません",
     "m.needsInput": "▲ {name} が入力待ちです",
     "m.pinned": "📌 {name}",
     "m.unpinned": "ピン解除: {name}",
@@ -297,6 +300,7 @@ const STRINGS = {
     "m.tab.log": "ログ",
     "m.searchPh": "絞り込み",
     "m.sendPh": "送信…",
+    "m.sendPhWaiting": "空欄のまま送信で確定",
     "m.send": "送信",
     // ---- header ----
     "tab.grid": "画面一覧",
