@@ -346,3 +346,47 @@ describe("選択肢以外の操作(extras)", () => {
     expect(p?.extras ?? []).toEqual([]);
   });
 });
+
+// AskUserQuestion は1回の tool_use に複数の質問を持てて、TUI は1問ずつ順に出す。
+// questions[0] 固定だと、2問目に進んでも1問目を出し続けて「切り替わらない」。
+// 実データでは複数質問のものが71件あった。
+describe("複数質問の AskUserQuestion", () => {
+  const line = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", id: "t1", name: "AskUserQuestion", input: { questions: [
+      { question: "Q1: 表示場所は?", options: [{ label: "ヘッダーに出す" }, { label: "サイドバーに出す" }] },
+      { question: "Q2: 反映範囲は?", options: [{ label: "この画面だけ" }, { label: "全画面に反映" }] },
+    ] } }] },
+  });
+
+  test("画面に出ている選択肢と一致する質問を選ぶ", () => {
+    const p = detectAskPrompt([line], ["この画面だけ", "全画面に反映"]);
+    expect(p?.question).toBe("Q2: 反映範囲は?");
+    expect(p?.options.map(o => o.label)).toEqual(["この画面だけ", "全画面に反映"]);
+  });
+
+  test("1問目が出ているならそちらを選ぶ", () => {
+    expect(detectAskPrompt([line], ["ヘッダーに出す", "サイドバーに出す"])?.question)
+      .toBe("Q1: 表示場所は?");
+  });
+
+  // 画面側のラベルは幅で切れることがある。完全一致を求めると当たらない
+  test("画面のラベルが途中で切れていても一致させる", () => {
+    expect(detectAskPrompt([line], ["この画面だ", "全画面に反"])?.question)
+      .toBe("Q2: 反映範囲は?");
+  });
+
+  test("手がかりが無ければ先頭の質問", () => {
+    expect(detectAskPrompt([line])?.question).toBe("Q1: 表示場所は?");
+  });
+
+  // 選択肢が1つしかない質問は操作の対象にならない
+  test("選択肢が足りない質問は候補から外す", () => {
+    const l = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2",
+      name: "AskUserQuestion", input: { questions: [
+        { question: "壊れ", options: [{ label: "唯一" }] },
+        { question: "有効", options: [{ label: "A" }, { label: "B" }] },
+      ] } }] } });
+    expect(detectAskPrompt([l])?.question).toBe("有効");
+  });
+});

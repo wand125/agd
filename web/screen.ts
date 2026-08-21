@@ -163,7 +163,11 @@ function detectExtras(lines: string[], optCount: number, cursorIdx: number): { l
 //
 // 「未応答か」は、対応する tool_result がまだ書かれていないことで判定する。
 // 応答済みのものを拾うと、待機していないセッションにボタンが出てしまう。
-export function detectAskPrompt(lines: string[]): PromptInfo | null {
+// screenHint: いま画面に出ている選択肢のラベル(detectPrompt の結果)。
+// AskUserQuestion は1回の tool_use に複数の質問を持てて、TUI は1問ずつ
+// 順に出す。questions[0] 固定だと2問目に進んでも1問目を出し続けるため、
+// 画面と照合してどの質問が表示中かを選ぶ(実データで71件が複数質問だった)
+export function detectAskPrompt(lines: string[], screenHint?: string[]): PromptInfo | null {
   const asks = new Map<string, any>();
   const answered = new Set<string>();
   for (const l of lines) {
@@ -181,7 +185,24 @@ export function detectAskPrompt(lines: string[]): PromptInfo | null {
   // 最後の未応答のものが「今聞かれていること」
   let pending: any = null;
   for (const [id, input] of asks) if (!answered.has(id)) pending = input;
-  const q = pending?.questions?.[0];
+  const all: any[] = Array.isArray(pending?.questions) ? pending.questions : [];
+  const usable = all.filter((x: any) => Array.isArray(x?.options) && x.options.length >= 2);
+  if (!usable.length) return null;
+  // 画面に見えているラベルと最も一致する質問を選ぶ。手がかりが無ければ先頭。
+  // 部分一致で数えるのは、画面側は幅で切れていることがあるため
+  const norm = (v: string) => v.replace(/\s+/g, "").toLowerCase();
+  const hint = (screenHint ?? []).map(norm).filter(Boolean);
+  let q = usable[0];
+  if (hint.length) {
+    let best = -1;
+    for (const cand of usable) {
+      const labels = cand.options.map((o: any) => norm(String(o?.label ?? "")));
+      // 画面のラベルが選択肢の先頭に一致するか(逆向きも見る)で数える
+      const score = hint.filter(h =>
+        labels.some((l: string) => l.startsWith(h) || h.startsWith(l))).length;
+      if (score > best) { best = score; q = cand; }
+    }
+  }
   if (!q || !Array.isArray(q.options) || q.options.length < 2) return null;
   return {
     question: typeof q.question === "string" ? q.question.slice(0, 120) : undefined,

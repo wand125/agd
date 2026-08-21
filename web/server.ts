@@ -1114,14 +1114,16 @@ function aiTitleOf(path: string): string {
 // 未応答の AskUserQuestion をトランスクリプトから取る。画面解析より確実で
 // description も取れるため、取れた場合はこちらを優先する。
 // ai-title と同じく末尾だけ読み、mtime が変わらなければ再走査しない
-const askCache = new Map<string, { mtime: number; prompt: PromptInfo | null }>();
-function askPromptForSid(sid: string): PromptInfo | null {
+const askCache = new Map<string, { mtime: number; prompt: PromptInfo | null; hint: string }>();
+function askPromptForSid(sid: string, screenHint?: string[]): PromptInfo | null {
   const path = findClaudeTranscript(sid);
   if (!path) return null;
   let st;
   try { st = statSync(path); } catch { return null; }
+  // 同じファイルでも画面が別の質問に進めば結果が変わるため、ヒントもキーに含める
+  const hintKey = (screenHint ?? []).join("|");
   const c = askCache.get(path);
-  if (c && c.mtime === st.mtimeMs) return c.prompt;
+  if (c && c.mtime === st.mtimeMs && c.hint === hintKey) return c.prompt;
   let prompt: PromptInfo | null = null;
   try {
     // 質問と応答は近接して現れるので末尾だけで足りる
@@ -1131,9 +1133,9 @@ function askPromptForSid(sid: string): PromptInfo | null {
     const buf = Buffer.alloc(st.size - start);
     readSync(fd, buf, 0, buf.length, start);
     closeSync(fd);
-    prompt = detectAskPrompt(buf.toString("utf8").split("\n"));
+    prompt = detectAskPrompt(buf.toString("utf8").split("\n"), screenHint);
   } catch {}
-  askCache.set(path, { mtime: st.mtimeMs, prompt });
+  askCache.set(path, { mtime: st.mtimeMs, prompt, hint: hintKey });
   return prompt;
 }
 
@@ -1577,7 +1579,9 @@ function applyPrompts(running: Session[], screens: Map<string, string>) {
     // ただし「画面にも選択プロンプトが出ている」ことは条件に残す。転記だけを
     // 根拠にすると、応答直後でまだ tool_result が書かれていない一瞬に、待機して
     // いないセッションへボタンを出してしまう(実際に踏んだ)。
-    const ask = s.agent === "claude" && p?.options.length ? askPromptForSid(s.sid) : null;
+    const ask = s.agent === "claude" && p?.options.length
+      ? askPromptForSid(s.sid, p.options.map(o => o.label))
+      : null;
     // 選択の実行はキー送信なので、カーソル位置だけは画面の値を使う。
     //
     // 画面がスクロールしていたり幅が狭いと、見えている選択肢が転記より少ない
