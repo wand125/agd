@@ -283,8 +283,28 @@ async function refreshClaudeRunningInner(): Promise<void> {
   lastClaudeRunning = { at: Date.now(), list };
 }
 
+// `ps -axo` は全プロセスを舐めるため、常駐が多い環境では 1 回 0.3〜0.8 秒かかる
+// (実測: 948 プロセスで最大 0.80s)。ポーリング 1 周で 2 回呼んでおり、
+// Bun は単一スレッドなのでその間 API 応答も止まる(実測で最大 4 秒のブロック)。
+// 1 周の中では同じ結果でよいので、短命キャッシュで共有する
+let psCache: { at: number; out: string } = { at: 0, out: "" };
+// pid → cwd。プロセスの cwd は変わらないので使い回せる
+const codexCwdCache = new Map<number, string>();
+// POLL_MS(2.5s)より長くする。短いと毎周期で期限切れになり、1周に2回ある
+// 呼び出しの間でしか効かない(実測: 2000ms では codexRunning が 400ms のまま)。
+// プロセスの増減が最大 5 秒遅れて見えるが、セッションの検出は claude agents 側が
+// 持っており、ここは codex の検出と ssh の attach 判定にしか使わないので許容できる
+const PS_CACHE_MS = 5000;
+async function psSnapshot(): Promise<string> {
+  if (Date.now() - psCache.at < PS_CACHE_MS) return psCache.out;
+  const out = await sh(["ps", "-axo", "pid=,tty=,command="]);
+  // 取得に失敗したときは前回値を残す(空にすると全セッションが消える)
+  if (out) psCache = { at: Date.now(), out };
+  return psCache.out;
+}
+
 async function codexRunning(): Promise<Session[]> {
-  const psOut = await sh(["ps", "-axo", "pid=,tty=,command="]);
+  const psOut = await psSnapshot();
   const procs: { pid: number; tty: string; sid: string }[] = [];
   for (const l of psOut.split("\n")) {
     const m = l.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
@@ -305,13 +325,25 @@ async function codexRunning(): Promise<Session[]> {
     procs.push({ pid: Number(m[1]), tty: m[2] === "??" ? "" : m[2], sid });
   }
   if (!procs.length) return [];
-  const lsofOut = await sh(["lsof", "-a", "-p", procs.map(p => p.pid).join(","), "-d", "cwd", "-Fpn"]);
-  const cwdByPid = new Map<number, string>();
-  let cur = 0;
-  for (const l of lsofOut.split("\n")) {
-    if (l.startsWith("p")) cur = Number(l.slice(1));
-    else if (l.startsWith("n")) cwdByPid.set(cur, l.slice(1));
+  // lsof は 0.2〜0.38 秒かかる(実測)。プロセスの cwd は起動後に変わらないので、
+  // 未取得の pid があるときだけ引く。常駐している間は 2 回目以降ゼロコストになる
+  const unknown = procs.map(p => p.pid).filter(pid => !codexCwdCache.has(pid));
+  if (unknown.length) {
+    const lsofOut = await sh(["lsof", "-a", "-p", unknown.join(","), "-d", "cwd", "-Fpn"]);
+    let cur = 0;
+    for (const l of lsofOut.split("\n")) {
+      if (l.startsWith("p")) cur = Number(l.slice(1));
+      else if (l.startsWith("n")) codexCwdCache.set(cur, l.slice(1));
+    }
+    // 引けなかった pid も記録して、毎周期の再試行を防ぐ
+    for (const pid of unknown) if (!codexCwdCache.has(pid)) codexCwdCache.set(pid, "");
   }
+  // 死んだ pid を溜め込まない
+  if (codexCwdCache.size > 200) {
+    const alive = new Set(procs.map(p => p.pid));
+    for (const pid of codexCwdCache.keys()) if (!alive.has(pid)) codexCwdCache.delete(pid);
+  }
+  const cwdByPid = codexCwdCache;
   const now = Date.now() / 1000;
   const out: Session[] = [];
   const seenSid = new Set<string>();
@@ -1436,7 +1468,7 @@ let sshAttachCache: { at: number; list: SshAttach[] } = { at: 0, list: [] };
 
 async function sshAttachments(): Promise<SshAttach[]> {
   if (Date.now() - sshAttachCache.at < 3000) return sshAttachCache.list;
-  const out = await sh(["ps", "-axo", "pid=,tty=,command="]);
+  const out = await psSnapshot();
   const list: SshAttach[] = [];
   for (const l of out.split("\n")) {
     const m = l.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
