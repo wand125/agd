@@ -1561,7 +1561,7 @@ function renderLog(force) {
     if (e.role === "user") return `<div class="entry user">${ts}${renderMarkdown(e.text)}</div>`;
     if (e.role === "assistant") return `<div class="entry assistant">${ts}${renderMarkdown(e.text)}</div>`;
     const label = e.role === "thinking" ? t("detail.thinking") : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : t("detail.result");
-    const body = e.role === "tool_use" ? renderToolUse(e) : linkify(esc(e.text));
+    const body = e.role === "tool_use" ? renderToolUse(e, sessionOf(detailKey)) : linkify(esc(e.text));
     const more = e.truncated ? `<div class="load-full" data-i="${idx}">${t("detail.showFull", { limit: t("detail.truncateLabel") })}</div>` : "";
     return `<div class="entry ${e.role}"><details${detailOpen.has(idx) ? " open" : ""}><summary>${ts}${label}</summary><pre>${body}</pre>${more}</details></div>`;
   }).join("");
@@ -1581,7 +1581,7 @@ function renderLog(force) {
       if (entry) {
         const me = isMasked() ? { ...entry, text: maskText(entry.text) } : entry;
         const pre = el.querySelector("pre");
-        pre.innerHTML = me.role === "tool_use" ? renderToolUse(me) : linkify(esc(me.text));
+        pre.innerHTML = me.role === "tool_use" ? renderToolUse(me, sessionOf(detailKey)) : linkify(esc(me.text));
         full.remove();
       }
     };

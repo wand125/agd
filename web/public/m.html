@@ -277,6 +277,17 @@
   .nitem.up { color: var(--dim); }
   #new-list .empty { padding: 20px; text-align: center; color: var(--dim); font-size: 13px; }
 
+  /* SendUserFile のファイルカード。画像は実物を出し、他は名前だけ */
+  .fc-caption { font-size: 12.5px; color: var(--fg); margin-bottom: 6px; white-space: pre-wrap; }
+  .filecard { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+              background: var(--bg); margin-bottom: 6px; max-width: 520px; }
+  .filecard img { display: block; width: 100%; height: auto; max-height: 320px;
+                  object-fit: contain; background: #0d1117; }
+  .fc-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11.5px; }
+  .fc-name { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fc-ico { flex: none; }
+  .fc-dl { margin-left: auto; flex: none; color: var(--accent); text-decoration: none; }
+  .fc-dl:hover { text-decoration: underline; }
   .toast { animation: toastIn .18s ease-out;
            position: fixed; left: 50%; transform: translateX(-50%);
            bottom: calc(var(--safe-bottom) + 70px); background: #21262d; color: var(--fg);

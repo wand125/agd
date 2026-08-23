@@ -102,6 +102,7 @@ const STRINGS = {
     "detail.loadOlderCount": "▲ Load more ({n} remaining)",
     "detail.thinking": "💭 Thinking",
     "detail.result": "📄 Result",
+    "file.download": "Download",
     "detail.showFull": "…Show full text ({limit})",
     "detail.truncateLabel": "truncated at 4,000 characters",
 
@@ -355,6 +356,7 @@ const STRINGS = {
     "detail.loadOlderCount": "▲ さらに読み込む(残り {n} 件)",
     "detail.thinking": "💭 思考",
     "detail.result": "📄 結果",
+    "file.download": "ダウンロード",
     "detail.showFull": "…全文を表示({limit})",
     "detail.truncateLabel": "4000字で省略中",
 

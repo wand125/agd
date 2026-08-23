@@ -1098,6 +1098,30 @@ function listSubagents(sid: string): { id: string; name: string; mtime: number; 
   return out.sort((a, b) => a.mtime - b.mtime);
 }
 
+// トランスクリプトに実際に現れたパスかを確認する。SendUserFile の入力を
+// 総当たりで見るのではなく、JSON 文字列としての出現を見れば十分
+// (パスは JSON.stringify されて記録されるため)
+const fileAllowCache = new Map<string, { mtime: number; ok: Set<string> }>();
+function fileAllowedBy(transcript: string, want: string): boolean {
+  let st; try { st = statSync(transcript); } catch { return false; }
+  const c = fileAllowCache.get(transcript);
+  if (c && c.mtime === st.mtimeMs) return c.ok.has(want);
+  const ok = new Set<string>();
+  try {
+    for (const line of readFileSync(transcript, "utf8").split("\n")) {
+      if (!line.includes("SendUserFile")) continue;
+      let o: any; try { o = JSON.parse(line); } catch { continue; }
+      for (const b of (o?.message?.content ?? [])) {
+        if (!b || b.name !== "SendUserFile") continue;
+        const fs = b.input?.files;
+        if (Array.isArray(fs)) for (const f of fs) if (typeof f === "string") ok.add(f);
+      }
+    }
+  } catch {}
+  fileAllowCache.set(transcript, { mtime: st.mtimeMs, ok });
+  return ok.has(want);
+}
+
 function findClaudeTranscript(sid: string): string | null {
   let dirs: string[] = [];
   try { dirs = readdirSync(CLAUDE_PROJECTS); } catch { return null; }
@@ -1841,6 +1865,34 @@ try {
       return new Response(Bun.file(join(import.meta.dir, "public", "apple-touch-icon.png")));
     if (url.pathname === "/api/sessions")
       return Response.json(lastSnapshot);
+    // SendUserFile で送られたファイルを配信する(ログのサムネイル用)。
+    //
+    // 任意のパスを読ませると、トークンを持つ相手にディスク全体を晒すことに
+    // なる。そこで「そのセッションのトランスクリプトに実際に出てきたパス」
+    // だけを許可する。ログに現れないファイルは 403 で弾く
+    if (url.pathname === "/api/file") {
+      const agent = url.searchParams.get("agent") ?? "";
+      const sid = url.searchParams.get("sid") ?? "";
+      const want = url.searchParams.get("path") ?? "";
+      if (!sid || !want) return new Response("bad request", { status: 400 });
+      const tpath = agent === "claude" ? findClaudeTranscript(sid) : rolloutById(sid)?.path;
+      if (!tpath || !existsSync(tpath)) return new Response("not found", { status: 404 });
+      if (!fileAllowedBy(tpath, want)) return new Response("forbidden", { status: 403 });
+      if (!existsSync(want)) return new Response("not found", { status: 404 });
+      // 大きすぎるものは返さない(サムネイル用途なので実害が無い)
+      let st; try { st = statSync(want); } catch { return new Response("not found", { status: 404 }); }
+      if (!st.isFile() || st.size > 200 * 1024 * 1024) return new Response("too large", { status: 413 });
+      // ?dl=1 でダウンロードさせる。付けない場合はブラウザ内で表示(画像/PDF)
+      const name = want.slice(want.lastIndexOf("/") + 1);
+      const headers: Record<string, string> = {};
+      if (url.searchParams.get("dl") === "1") {
+        // ファイル名に " や改行が入っても壊れないよう、RFC 5987 形式も併記する
+        const safe = name.replace(/["\\\r\n]/g, "_");
+        headers["Content-Disposition"] =
+          `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+      }
+      return new Response(Bun.file(want), { headers });
+    }
     if (url.pathname === "/api/projects") {
       const cwds = [...new Set(lastSnapshot.sessions.map(s => s.cwd).filter(Boolean))].sort();
       return Response.json({ projects: cwds });

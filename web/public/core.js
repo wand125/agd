@@ -263,10 +263,37 @@ function renderMarkdown(text) {
 
 // ---------------- ツール入力の整形 ----------------
 // Edit/Write は diff として、Bash はコマンドとして見せる。両ビューで共用する。
-function renderToolUse(e) {
+// s(セッション)を渡すと、SendUserFile をファイルカードとして描ける。
+// 省略した場合は従来どおり(カードにはしない)
+
+// SendUserFile のカード。画像は実物を出し、それ以外はアイコンと名前だけ出す。
+// 実体は /api/file から取る(トランスクリプトに出てきたパスだけが通る)
+const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+function renderFileCards(obj, s) {
+  const caption = typeof obj.caption === "string" ? obj.caption : "";
+  const cards = obj.files.filter(f => typeof f === "string").slice(0, 8).map(f => {
+    const name = f.slice(f.lastIndexOf("/") + 1);
+    const q = `agent=${encodeURIComponent(s.agent)}&sid=${encodeURIComponent(s.sid)}&path=${encodeURIComponent(f)}`;
+    const dl = `<a class="fc-dl" href="/api/file?${q}&dl=1" download="${escAttr(name)}">${esc(t("file.download"))}</a>`;
+    if (IMG_EXT.test(f))
+      return `<div class="filecard">
+        <a href="/api/file?${q}" target="_blank" rel="noopener"><img src="/api/file?${q}" alt="${escAttr(name)}" loading="lazy"></a>
+        <div class="fc-foot"><span class="fc-name" title="${escAttr(f)}">${esc(maskText(name))}</span>${dl}</div>
+      </div>`;
+    return `<div class="filecard">
+      <div class="fc-foot"><span class="fc-ico">📄</span><span class="fc-name" title="${escAttr(f)}">${esc(maskText(name))}</span>${dl}</div>
+    </div>`;
+  }).join("");
+  return `${caption ? `<div class="fc-caption">${esc(maskText(caption))}</div>` : ""}${cards}`;
+}
+
+function renderToolUse(e, s) {
   let obj = null;
   try { obj = JSON.parse(e.text); } catch {}
   if (obj && typeof obj === "object") {
+    // ファイル送信。生の JSON を出しても読めないので、名前・説明・
+    // サムネイル・ダウンロードを持つカードにする
+    if (e.title === "SendUserFile" && Array.isArray(obj.files) && s?.sid) return renderFileCards(obj, s);
     if (typeof obj.old_string === "string" && typeof obj.new_string === "string") {
       const del = obj.old_string.split("\n").map(l => `<span class="diff-line diff-del">- ${esc(l)}</span>`).join("");
       const add = obj.new_string.split("\n").map(l => `<span class="diff-line diff-add">+ ${esc(l)}</span>`).join("");

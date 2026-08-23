@@ -599,7 +599,7 @@ async function loadLog(s, force = false) {
     if (e.role === "assistant") return `<div class="entry assistant">${ts}${renderMarkdown(e.text)}</div>`;
     const label = e.role === "thinking" ? t("detail.thinking")
       : e.role === "tool_use" ? `🔧 ${esc(e.title ?? "tool")}` : t("detail.result");
-    const body = e.role === "tool_use" ? renderToolUse(e) : linkify(esc(e.text));
+    const body = e.role === "tool_use" ? renderToolUse(e, sessionOf(openKey)) : linkify(esc(e.text));
     return `<div class="entry ${e.role}"><details data-i="${idx}"${logOpen.has(idx) ? " open" : ""}>` +
       `<summary>${ts}${label}</summary><pre>${body}</pre></details></div>`;
   }).join("") || `<div class="empty">${esc(t("m.noLog"))}</div>`;
