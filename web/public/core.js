@@ -269,17 +269,27 @@ function renderMarkdown(text) {
 // SendUserFile のカード。画像は実物を出し、それ以外はアイコンと名前だけ出す。
 // 実体は /api/file から取る(トランスクリプトに出てきたパスだけが通る)
 const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+// 動画・音声はブラウザで再生できる。ダウンロードして別アプリで開くより、
+// その場で確認できたほうが早い(録画を確認する用途が実際に多い)
+const VID_EXT = /\.(mp4|webm|mov|m4v)$/i;
+const AUD_EXT = /\.(mp3|wav|m4a|aac|ogg)$/i;
 function renderFileCards(obj, s) {
   const caption = typeof obj.caption === "string" ? obj.caption : "";
   const cards = obj.files.filter(f => typeof f === "string").slice(0, 8).map(f => {
     const name = f.slice(f.lastIndexOf("/") + 1);
     const q = `agent=${encodeURIComponent(s.agent)}&sid=${encodeURIComponent(s.sid)}&path=${encodeURIComponent(f)}`;
     const dl = `<a class="fc-dl" href="/api/file?${q}&dl=1" download="${escAttr(name)}">${esc(t("file.download"))}</a>`;
+    const foot = `<div class="fc-foot"><span class="fc-name" title="${escAttr(f)}">${esc(maskText(name))}</span>${dl}</div>`;
     if (IMG_EXT.test(f))
       return `<div class="filecard">
         <a href="/api/file?${q}" target="_blank" rel="noopener"><img src="/api/file?${q}" alt="${escAttr(name)}" loading="lazy"></a>
-        <div class="fc-foot"><span class="fc-name" title="${escAttr(f)}">${esc(maskText(name))}</span>${dl}</div>
+        ${foot}
       </div>`;
+    // preload="metadata" にして、開いただけで本体を落とさないようにする
+    if (VID_EXT.test(f))
+      return `<div class="filecard"><video src="/api/file?${q}" controls preload="metadata" playsinline></video>${foot}</div>`;
+    if (AUD_EXT.test(f))
+      return `<div class="filecard"><audio src="/api/file?${q}" controls preload="metadata"></audio>${foot}</div>`;
     return `<div class="filecard">
       <div class="fc-foot"><span class="fc-ico">📄</span><span class="fc-name" title="${escAttr(f)}">${esc(maskText(name))}</span>${dl}</div>
     </div>`;
