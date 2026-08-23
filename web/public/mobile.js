@@ -266,6 +266,12 @@ function openSheet(key) {
   if (!s) return;
   sheetKey = key;
   $("sheet-title").textContent = `${projName(s.cwd)} · ${s.agent}`;
+  // 停止中のセッションに「複製」「終了」を出しても意味が無い(どちらも
+  // 実行中のプロセスが前提)。状態に応じて出し分ける
+  const running = !!s.running;
+  $("sheet-resume").style.display = running ? "none" : "";
+  $("sheet-dup").style.display = running && s.sid ? "" : "none";
+  $("sheet-kill").style.display = running ? "" : "none";
   resetKill();                 // 前回の確認待ちを持ち越さない
   $("sheet-bg").classList.add("on");
   if (navigator.vibrate) navigator.vibrate(10);   // 長押しが効いたことを触感で返す
@@ -294,6 +300,22 @@ async function launchFrom(key, dup) {
     ? t("m.launched", { name: projName(s.cwd) })
     : t("m.launchFailed"));
 }
+// 停止中のセッションを再開する。会話を引き継いで同じセッションを続ける
+// (fork ではないので新しい sid にはならない)
+$("sheet-resume").onclick = async () => {
+  const s = sessionOf(sheetKey);
+  if (!s?.sid || !s?.cwd) { toastError(t("m.launchFailed")); return; }
+  closeSheet();
+  let r;
+  try {
+    r = await api("/api/resume", {
+      agent: s.agent, sid: s.sid, cwd: s.cwd,
+      cardKey: s.remote ? s.key : "",   // リモートはそのホスト側で再開する
+    });
+  } catch { toastError(t("m.launchFailed")); return; }
+  if (r?.error || !(r.result || "").startsWith("ok")) { toastError(t("m.launchFailed")); return; }
+  toast(t("m.resumed", { name: projName(s.cwd) }));
+};
 $("sheet-new").onclick = () => launchFrom(sheetKey, false);
 $("sheet-dup").onclick = () => launchFrom(sheetKey, true);
 

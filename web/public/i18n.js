@@ -12,6 +12,7 @@ const STRINGS = {
     // ---- mobile ----
     "m.empty": "No sessions match",
     "m.launchNew": "New session here",
+    "m.resume": "▶ Resume this session",
     "m.new.title": "New session",
     "m.new.tabTree": "Browse",
     "m.new.tabProj": "Recent",
@@ -23,6 +24,7 @@ const STRINGS = {
     "m.killed": "✕ Closed {name}",
     "m.killFailed": "Could not close",
     "m.launched": "▶ Launched in {name}",
+    "m.resumed": "▶ Resumed {name}",
     "m.launchFailed": "Could not launch",
     "m.loading": "Loading…",
     "m.noLog": "No log entries",
@@ -266,6 +268,7 @@ const STRINGS = {
     // ---- mobile ----
     "m.empty": "該当するセッションがありません",
     "m.launchNew": "このプロジェクトで新規",
+    "m.resume": "▶ このセッションを再開",
     "m.new.title": "新規セッション",
     "m.new.tabTree": "フォルダ",
     "m.new.tabProj": "使用履歴",
@@ -277,6 +280,7 @@ const STRINGS = {
     "m.killed": "✕ {name} を終了しました",
     "m.killFailed": "終了できませんでした",
     "m.launched": "▶ {name} で起動しました",
+    "m.resumed": "▶ {name} を再開しました",
     "m.launchFailed": "起動できませんでした",
     "m.loading": "読み込み中…",
     "m.noLog": "ログがありません",
