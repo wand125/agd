@@ -302,6 +302,22 @@ async function launchFrom(key, dup) {
 }
 // 停止中のセッションを再開する。会話を引き継いで同じセッションを続ける
 // (fork ではないので新しい sid にはならない)
+// 表示名(青文字)を変える。空にすると元の ai-title に戻る
+$("sheet-rename").onclick = async () => {
+  const s = sessionOf(sheetKey);
+  if (!s?.sid) { toastError(t("m.launchFailed")); return; }
+  const v = window.prompt(t("prompt.rename"), s.title ?? "");
+  if (v === null) return;
+  closeSheet();
+  let r;
+  try { r = await api("/api/title", { sid: s.sid, title: v.trim() }); }
+  catch { toastError(t("m.sendFailed")); return; }
+  if (r?.error) { toastError(t("m.sendFailed")); return; }
+  const cur = sessionOf(s.key);
+  if (cur) cur.title = r.title;
+  renderList();
+  toast(t("m.sent"));
+};
 $("sheet-resume").onclick = async () => {
   const s = sessionOf(sheetKey);
   if (!s?.sid || !s?.cwd) { toastError(t("m.launchFailed")); return; }

@@ -432,6 +432,7 @@ const INTERNAL_CMDS = [
   { cmd: "esc", descKey: "cmd.esc" },
   { cmd: "mode", descKey: "cmd.mode" },
   { cmd: "key ", descKey: "cmd.key" },
+  { cmd: "title ", descKey: "cmd.title" },
   { cmd: "mask", descKey: "cmd.mask" },
   { cmd: "sum", descKey: "cmd.sum" },
   { cmd: "/", descKey: "cmd.slash" },
@@ -555,6 +556,29 @@ function curSelKey() {
   return activeTab === "list" ? listKey : kbdKey;
 }
 // 選択セッションへ名前付きキーを送る(m: モード切替, s: 中断 など)
+// 表示名(青文字)の変更。空文字を渡すと上書きを外して元の ai-title に戻る
+// R キーから。いまの表示名を初期値にして尋ねる
+function promptRename(key) {
+  const s = sessionOf(key);
+  if (!s?.sid) { toastError(t("toast.noCardSelected")); return; }
+  const cur = s.title ?? "";
+  const v = window.prompt(t("prompt.rename"), cur);
+  if (v === null) return;            // キャンセル
+  renameSession(s, v.trim());
+}
+
+async function renameSession(s, title) {
+  let r;
+  try { r = await api("/api/title", { sid: s.sid, title }); }
+  catch (e) { toastError(t("toast.sendFailed", { err: String(e?.message ?? e) })); return; }
+  if (r?.error) { toastError(t("toast.sendFailed", { err: r.error })); return; }
+  // 次のポーリングを待たずに手元の表示も直す
+  const cur = sessionOf(s.key);
+  if (cur) cur.title = r.title;
+  render();
+  toast(t(r.title ? "toast.renamed" : "toast.renameCleared", { name: r.title }));
+}
+
 // 名前付きキー(サーバーの NAMED_KEYS と揃える)。これ以外は文字として送られる
 const NAMED_KEY_LIST = ["Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "ShiftTab", "Space"];
 
@@ -634,6 +658,11 @@ async function runCommand(c) {
     sendNamedKey("Escape", t("action.interrupt"));
   } else if (c === "mode") {
     sendNamedKey("ShiftTab", t("action.mode"));
+  } else if (c === "title" || c.startsWith("title ")) {
+    // :title <名前> で青文字(表示名)を変える。:title だけなら元に戻す
+    const s = sessionOf(curSelKey());
+    if (!s?.sid) { toastError(t("toast.noCardSelected")); return; }
+    renameSession(s, c.slice(5).trim());
   } else if (c.startsWith("key ")) {
     // TUI が想定外の操作を求めてきたときの抜け道。
     // ボタン化できるのは agd が形を知っている選択肢だけなので、
@@ -1256,6 +1285,7 @@ function keyDetail(e) {
     else if (e.ctrlKey && (e.key === "c" || e.key === "C") && detailKey) { e.preventDefault(); resumeContinue(detailKey); }
     else if (e.key === "f" && detailKey) jump(detailKey);
     else if (e.key === "r" && detailKey) { e.preventDefault(); resumeSelected(detailKey); }
+    else if (e.key === "R" && detailKey) { e.preventDefault(); promptRename(detailKey); }
     else if (e.key === "s" && detailKey) sendNamedKey("Escape", t("action.interrupt"));
     else if (e.key === "m" && detailKey) sendNamedKey("ShiftTab", t("action.mode"));
     else if (e.key === ":") { e.preventDefault(); openCmdline(); }
@@ -1308,6 +1338,7 @@ function keyList(e) {
     else if (/^[1-9]$/.test(e.key) && s?.running) answerPromptByNumber(listKey, Number(e.key));
     else if (e.key === "p" && s) togglePin(listKey);
     else if (e.key === "r" && s) { e.preventDefault(); resumeSelected(listKey); }
+    else if (e.key === "R" && s) { e.preventDefault(); promptRename(listKey); }
     else if (e.key === "n") { e.preventDefault(); openNew(); }
     else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
     return true;
@@ -1388,6 +1419,7 @@ function keyGrid(e) {
   else if (e.key === "p" && kbdKey) togglePin(kbdKey);
   // r = 停止中のセッションを再開する(実行中なら何もしない)
   else if (e.key === "r" && sel) { e.preventDefault(); resumeSelected(kbdKey); }
+  else if (e.key === "R" && sel) { e.preventDefault(); promptRename(kbdKey); }
   else if (e.key === "/") { e.preventDefault(); $("search").focus(); }
   else if (/^[1-9]$/.test(e.key) && sel) answerPromptByNumber(kbdKey, Number(e.key));
   return false;
