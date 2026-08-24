@@ -943,7 +943,12 @@ async function jump(key) {
   // focus は必ず失敗するが、これは「別マシンから見ている」のとは別の話。
   // 手元で attach すれば済むので、ssh 無しのコマンドを出す
   if (r.localTmux) {
-    openAttach({ localTmux: r.localTmux, tmuxBin: window.agdTmuxBin || "tmux", copyOnly: true });
+    // 貼る先は「このブラウザを開いているマシンのターミナル」で、母艦とは
+    // 限らない(Neo からポートフォワード越しに見ている場合など)。
+    // agdTmuxBin は母艦の絶対パスなので、ここで使うと手元に無いパスを
+    // 渡してしまう(実際に /opt/homebrew/bin/tmux: no such file になった)。
+    // 素の tmux にして、手元の PATH に解決させる
+    openAttach({ localTmux: r.localTmux, tmuxBin: "tmux", copyOnly: true });
     return;
   }
   openAttach({
@@ -1027,12 +1032,17 @@ function openAttach(info) {
 // 共有したまま「どのウィンドウを見るか」だけを独立して持てる。
 // 同名ビューが残っていても -A で繋ぎ直すので増え続けない。
 function viewCmd(tm, target) {
-  const sess = target.split(":")[0];
+  // 念のため -view を剥がす。サーバー側は session_group を返すので通常は
+  // 付いていないが、古いスナップショットが残っていると view に対してさらに
+  // view を作る案内になり、-view-view-view と伸びていく(実際に起きた)
+  const sess = target.split(":")[0].replace(/(-view)+$/, "");
   const view = `${sess}-view`;
   return `${tm} new-session -A -t ${sess} -s ${view} \\; `
     // ウィンドウ番号だけを渡す("8.0" でも通るが意味が曖昧になる)
     + `select-window -t ${view}:${(target.split(":")[1] ?? "0").split(".")[0]} \\; `
-    + `select-pane -t ${target}`;
+    // ペイン指定も剥がした後のセッション名で組み直す(target をそのまま使うと
+    // -view の付いた存在しないセッションを指してしまう)
+    + `select-pane -t ${sess}:${target.split(":")[1] ?? "0.0"}`;
 }
 
 function attachCmd(info) {

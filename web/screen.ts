@@ -25,7 +25,12 @@ export type TmuxPane = { tty: string; paneId: string; target: string };
 // tmux はロケール未設定(LANG が無い環境)だとタブを印字不能文字とみなして "_" に
 // 置換するため、launchd から起動された agd では \t 区切りが壊れてペインを1つも
 // 認識できなかった。"|" は tmux が加工しないうえ tty/pane_id/session 名に現れない
-export const TMUX_PANE_FORMAT = "#{pane_tty}|#{pane_id}|#{session_name}:#{window_index}.#{pane_index}";
+// session_group を先に置く。attach 用に作った <session>-view も tmux 上は
+// 独立したセッションなので、session_name のままだと agd が view を「元の
+// セッション」と誤認し、その view にさらに -view を足したものを案内してしまう
+// (実際に work-view-view-view が生成された)。グループ化されている場合は
+// group が元のセッション名になるので、そちらを採用する
+export const TMUX_PANE_FORMAT = "#{pane_tty}|#{pane_id}|#{?session_group,#{session_group},#{session_name}}:#{window_index}.#{pane_index}";
 
 export function parseTmuxPanes(out: string): TmuxPane[] {
   return out.trim().split("\n").filter(Boolean).flatMap(l => {

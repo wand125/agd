@@ -134,3 +134,28 @@ describe("ssh 先ホストの決定", () => {
     for (const h of ["localhost", "127.0.0.1", "::1"]) expect(make(h, "")).toBe("");
   });
 });
+
+// attach 用に作る <session>-view も tmux 上は独立したセッションなので、
+// そのまま target にすると view にさらに view を作る案内になり、
+// -view-view-view と伸びていく(実際に生成されたものを確認した)
+describe("view セッションの二重生成", () => {
+  const attachCmd = loadAttachCmd();
+
+  test("target が既に -view でも view を重ねない", () => {
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "work-view:3.0" });
+    expect(cmd).toContain("-t work -s work-view");
+    expect(cmd).not.toContain("work-view-view");
+  });
+
+  test("-view が複数付いていても剥がす", () => {
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "work-view-view:3.0" });
+    expect(cmd).toContain("-t work -s work-view");
+    expect(cmd).not.toContain("work-view-view");
+  });
+
+  // 名前の途中に view を含むセッションまで削ってはいけない
+  test("末尾以外の view は残す", () => {
+    const cmd = attachCmd({ host: "m4", tmuxTarget: "viewer:1.0" });
+    expect(cmd).toContain("-t viewer -s viewer-view");
+  });
+});
