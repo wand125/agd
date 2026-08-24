@@ -271,7 +271,7 @@ async function refreshClaudeRunningInner(): Promise<void> {
       sid: a.sessionId,
       name: a.name || a.sessionId,
       // Claude アプリ側の表示名(ai-title)。識別名と併記する
-      title: titleForSid(a.sessionId, aiTitleForSid(a.sessionId)),
+      title: aiTitleForSid(a.sessionId),
       cwd: a.cwd,
       status,
       running: true,
@@ -405,7 +405,7 @@ function claudeRecent(excludeSids: Set<string>): Session[] {
     if (name === c.sid) name = historyPrompt(c.sid) || c.sid;
     out.push({
       key: `claude:${c.sid}`, agent: "claude", sid: c.sid, name, cwd,
-      title: titleForSid(c.sid, aiTitleOf(c.path)),
+      title: aiTitleOf(c.path),
       status: "resumable", running: false, tty: "",
       ageS: Math.floor((Date.now() - c.mtime) / 1000),
     });
@@ -745,15 +745,10 @@ async function gitInfo(cwd: string): Promise<GitInfo | null> {
 
 // ---------------------------------------------------------------- 設定 + macOS 通知
 const CONFIG_PATH = join(HOME, ".cache", "agd", "config.json");
-// titles: sid → 表示名の上書き。
-// Claude Code は会話が進むたび ai-title 行を書き直す(1ファイルに245回出た例あり)
-// ため、トランスクリプト側に書き足しても上書きされる。agd 側で持つ
-let config: { macNotify: boolean; summarize?: boolean; remotes?: RemoteHost[];
-              titles?: Record<string, string> } =
-  { macNotify: false, summarize: true, remotes: [], titles: {} };
+let config: { macNotify: boolean; summarize?: boolean; remotes?: RemoteHost[] } =
+  { macNotify: false, summarize: true, remotes: [] };
 try { config = { ...config, ...JSON.parse(readFileSync(CONFIG_PATH, "utf8")) }; } catch {}
 if (!Array.isArray(config.remotes)) config.remotes = [];
-if (!config.titles || typeof config.titles !== "object") config.titles = {};
 async function saveConfig() { try { await Bun.write(CONFIG_PATH, JSON.stringify(config)); } catch {} }
 
 let notifierPath: string | null | undefined; // undefined=未チェック
@@ -1201,12 +1196,6 @@ function askPromptForSid(sid: string, screenHint?: string[]): PromptInfo | null 
 }
 
 // sid だけ分かっている場合(実行中セッション)の表示名解決
-// 表示名。agd 側の上書きがあればそれを優先する
-function titleForSid(sid: string, fallback: string): string {
-  const t = config.titles?.[sid];
-  return typeof t === "string" && t ? t : fallback;
-}
-
 function aiTitleForSid(sid: string): string {
   const p = findClaudeTranscript(sid);
   return p ? aiTitleOf(p) : "";
@@ -1772,7 +1761,7 @@ const READONLY = /^(1|true|yes)$/i.test(process.env.AGD_READONLY || "");
 const COOKIE = "agd_token";
 // 書き込み系(セッションを操作する)API。READONLY ではここを拒否する
 const MUTATING = new Set([
-  "/api/send", "/api/key", "/api/close", "/api/new", "/api/resume", "/api/title",
+  "/api/send", "/api/key", "/api/close", "/api/new", "/api/resume",
   "/api/remote-attach", "/api/remotes", "/api/config", "/api/summarize",
 ]);
 
@@ -1903,18 +1892,6 @@ try {
           `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(name)}`;
       }
       return new Response(Bun.file(want), { headers });
-    }
-    // 表示名(青文字)の変更。空文字を渡すと上書きを外して元に戻す
-    if (req.method === "POST" && url.pathname === "/api/title") {
-      const { sid, title } = await req.json();
-      if (!sid) return Response.json({ error: "sid required" }, { status: 400 });
-      const v = String(title ?? "").trim().slice(0, 80);
-      if (v) config.titles![String(sid)] = v;
-      else delete config.titles![String(sid)];
-      await saveConfig();
-      // 次のポーリングを待たずに反映する
-      for (const x of lastSnapshot.sessions) if (x.sid === sid) (x as Session).title = v;
-      return Response.json({ result: "ok", title: v });
     }
     if (url.pathname === "/api/projects") {
       const cwds = [...new Set(lastSnapshot.sessions.map(s => s.cwd).filter(Boolean))].sort();
