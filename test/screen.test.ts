@@ -390,3 +390,40 @@ describe("複数質問の AskUserQuestion", () => {
     expect(detectAskPrompt([l])?.question).toBe("有効");
   });
 });
+
+// 複数選択の画面では Submit が選択肢の途中(Chat about this より上)に
+// 置かれることがある。「最後の選択肢より下」だけを見ていたため拾えず、
+// チェックは付けられるのに確定できなかった。
+describe("選択肢の途中にある Submit", () => {
+  const screen = (cursor: number) => [
+    "どの観点を中心にしますか？",
+    "",
+    ...[1, 2, 3, 4, 5].map(n => `${cursor === n - 1 ? "❯ " : "  "}${n}. [ ] 選択肢${n}`),
+    "     Submit",
+    "────────",
+    "  6. Chat about this",
+  ].join("\n");
+
+  test("Submit を操作として拾う", () => {
+    expect(detectPrompt(screen(0))?.extras?.map(x => x.label)).toEqual(["Submit"]);
+  });
+
+  // カーソルは選択肢と操作行を順に通るので、通し位置で数える必要がある
+  test("送るキー数がカーソル位置に追従する", () => {
+    const down = (c: number) =>
+      detectPrompt(screen(c))!.extras![0].keys.filter(k => k === "Down").length;
+    expect(down(0)).toBe(5);   // 選択肢1 → 5つ下が Submit
+    expect(down(4)).toBe(1);   // 選択肢5 → すぐ下
+  });
+
+  // ラベルがチェックボックスなら、数字は ON/OFF で確定に Enter が要る。
+  // 転記が取れない場面でも確定手段を出せるよう画面から判定する
+  test("チェックボックスが並べば複数選択とみなす", () => {
+    expect(detectPrompt(screen(0))?.multiSelect).toBe(true);
+  });
+
+  test("チェックが1つ以下なら複数選択にしない", () => {
+    expect(detectPrompt(["選ぶ?", "❯ 1. [✔] A", "  2. 普通"].join("\n"))?.multiSelect).toBeUndefined();
+    expect(detectPrompt(["選ぶ?", "❯ 1. はい", "  2. いいえ"].join("\n"))?.multiSelect).toBeUndefined();
+  });
+});

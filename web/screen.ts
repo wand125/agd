@@ -90,6 +90,10 @@ export function detectPrompt(screen: string | undefined): PromptInfo | null {
       question: findQuestion(firstIdx), options: opts.slice(0, 8),
       kind: "numbered", cursorIndex: numCursorIdx,
       extras: detectExtras(lines, opts.length, numCursorIdx),
+      // ラベルにチェックボックスが並ぶ画面は複数選択。数字はチェックの
+      // ON/OFF でしかなく確定に Enter が要る。転記が取れない場面でも
+      // 確定手段を出せるよう、画面からも判定する
+      multiSelect: opts.filter(o => /\[[ xX✔✓*]\]/.test(o.label)).length >= 2 || undefined,
     };
   // 設定フォーム(auto mode のセットアップ画面など)。行が「選択肢」ではなく
   // ウィジェット(◀ 値 ▶ / [✔] / [ ])を持つ設定項目で、上下に動いて個別に
@@ -142,21 +146,30 @@ const EXTRA_LINE = /^(Chat about this|Submit|Confirm|Done|Cancel|チャットで
 
 function detectExtras(lines: string[], optCount: number, cursorIdx: number): { label: string; keys: string[] }[] {
   const out: { label: string; keys: string[] }[] = [];
-  // 番号付き選択肢の最後の行を探し、それより下だけを見る
   const optRe = new RegExp(`^\\s*[${CURSOR}]?\\s*\\d+\\.\\s+\\S`);
-  let lastOpt = -1;
-  lines.forEach((l, i) => { if (optRe.test(l)) lastOpt = i; });
-  if (lastOpt < 0) return out;
-  // 見えている順に番号を振る。選択肢の次の行が1つ目の操作
-  let step = 0;
-  for (let i = lastOpt + 1; i < lines.length; i++) {
-    const t = (lines[i] ?? "").replace(CURSOR_HEAD, "").trim();
+  // 最初の選択肢より下を、選択肢と操作行が混ざったまま順に辿る。
+  //
+  // 以前は「最後の選択肢より下」だけを見ていたが、複数選択の画面では
+  // Submit が選択肢の途中(Chat about this より上)に置かれることがあり、
+  // 拾えずに確定できなかった。カーソルは選択肢と操作行の両方を順に通るので、
+  // 「先頭からの通し位置」で数えれば送るキー数が求まる
+  let firstOpt = -1;
+  lines.forEach((l, i) => { if (firstOpt < 0 && optRe.test(l)) firstOpt = i; });
+  if (firstOpt < 0) return out;
+  let idx = -1;   // 選択肢・操作行を通した並び順(0 始まり)
+  for (let i = firstOpt; i < lines.length; i++) {
+    const raw = lines[i] ?? "";
+    const t = raw.replace(CURSOR_HEAD, "").trim();
     if (!t) continue;
-    if (!EXTRA_LINE.test(t)) continue;
-    step++;
-    // 現在のカーソル位置(選択肢の何番目か)から、その操作行まで下へ送る
-    const down = (optCount - 1 - cursorIdx) + step;
-    out.push({ label: t.slice(0, 40), keys: [...Array(down).fill("Down"), "Enter"] });
+    if (optRe.test(raw)) { idx++; continue; }          // 選択肢
+    if (!EXTRA_LINE.test(t)) continue;                 // 説明文など
+    idx++;
+    const down = idx - cursorIdx;
+    // カーソルより上にある操作行は Up で戻る
+    const keys = down >= 0
+      ? [...Array(down).fill("Down"), "Enter"]
+      : [...Array(-down).fill("Up"), "Enter"];
+    out.push({ label: t.slice(0, 40), keys });
   }
   return out.slice(0, 4);
 }
