@@ -133,6 +133,17 @@ function rolloutByCwd(cwd: string): RolloutMeta | undefined {
     if (m.cwd === cwd && (!best || m.mtime > best.mtime)) best = m;
   return best;
 }
+
+// 同じ cwd で codex を複数起動している場合、rolloutByCwd はどちらにも同じ
+// (最新の)rollout を返す。sid が衝突して 2 つ目が seenSid で捨てられ、
+// 一覧から丸ごと消えていた(実際に ttys071 のセッションが出ていなかった)。
+// 使用済みを避けながら新しい順に割り当てる
+function rolloutByCwdExcluding(cwd: string, used: Set<string>): RolloutMeta | undefined {
+  let best: RolloutMeta | undefined;
+  for (const m of rolloutCache.values())
+    if (m.cwd === cwd && !used.has(m.id) && (!best || m.mtime > best.mtime)) best = m;
+  return best;
+}
 function rolloutById(id: string): RolloutMeta | undefined {
   for (const m of rolloutCache.values()) if (m.id === id) return m;
   return undefined;
@@ -353,7 +364,7 @@ async function codexRunning(): Promise<Session[]> {
     const cwd = cwdByPid.get(p.pid);
     if (!cwd) continue;
     // resume/fork はコマンドラインの sid を信頼する。それ以外は cwd から逆引き
-    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwd(cwd);
+    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, seenSid);
     const sid = meta?.id ?? p.sid;
     if (sid && seenSid.has(sid)) continue;
     if (sid) seenSid.add(sid);
