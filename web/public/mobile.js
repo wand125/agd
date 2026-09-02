@@ -210,12 +210,17 @@ $("q").oninput = (e) => { query = e.target.value; renderList(); };
     cancelHold();
     if (!row) { swiping = false; return; }
     const fired = fire && dir === "h" && row.classList.contains("armed");
+    const swiped = dir === "h";        // 実際に横へ動かしたか
     const k = key;
     row.classList.remove("armed");
     reset(true);
     swiping = false;
     if (fired && k) togglePin(k);      // ここで renderList が走り一覧が最新になる
-    else renderList();                 // 止めていた間の更新を反映
+    // 横に動かしていない = ただのタップ。ここで renderList すると DOM が
+    // 作り直され、直後に来る click で closest(".row") が null になって
+    // 詳細が開かない(選択肢が出ている行は高さが変わるぶん特に起きやすい)。
+    // タップの場合は描き直さず、次のスナップショットに任せる
+    else if (swiped) renderList();     // 止めていた間の更新を反映
   };
   list.addEventListener("touchstart", (e) => {
     reset(false);
