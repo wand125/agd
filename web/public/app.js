@@ -125,7 +125,7 @@ function setTab(tab) {
   $("views").classList.toggle("split", split);
   // 右ペインは「1枚の画面+ログ」の詳細。既存のモーダルを流用する
   document.body.classList.toggle("split-detail", split);
-  if (split) { updateSplitTop(); setSplitPane("list"); openSplitDetail(listKey ?? kbdKey); }
+  if (split) { updateSplitTop(); applySplitSizes(); setSplitPane("list"); openSplitDetail(listKey ?? kbdKey); }
   else if (splitDetailOpen) { splitDetailOpen = false; closeDetail(); }
   $("grid-view").style.display = tab === "list" ? "none" : "";
   $("list-view").style.display = tab === "grid" ? "none" : "block";
@@ -381,6 +381,78 @@ function updateSplitTop() {
   document.documentElement.style.setProperty("--split-top", h + "px");
 }
 addEventListener("resize", updateSplitTop);
+
+// ---------------- 3カラムの幅をドラッグで変える ----------------
+// 左(一覧) | 端末画面 | ログ の2つの境目を掴んで動かす。
+// 幅は CSS 変数で持ち、localStorage に覚えて次回も同じ配分で開く。
+const SPLIT_MIN_LEFT = 280, SPLIT_MIN_RIGHT = 360;   // これ以上は詰めない
+const SPLIT_MIN_PCT = 20, SPLIT_MAX_PCT = 85;        // 画面/ログの比率の上下限
+
+function applySplitSizes() {
+  const left = Number(localStorage.getItem("agd-split-left"));
+  const pct = Number(localStorage.getItem("agd-split-screen"));
+  const root = document.documentElement.style;
+  if (left) root.setProperty("--split-left", left + "px");
+  if (pct) root.setProperty("--split-screen", pct + "%");
+  placeResizers();
+}
+
+// 仕切りは position:fixed なので、実際の列の境目に合わせて置き直す
+function placeResizers() {
+  const lv = $("list-view");
+  if (lv && lv.offsetWidth) $("rz-list").style.left = lv.getBoundingClientRect().right + "px";
+  const sc = $("detail-screen");
+  if (sc && sc.offsetWidth) $("rz-screen").style.left = sc.getBoundingClientRect().right + "px";
+}
+addEventListener("resize", placeResizers);
+
+function startColDrag(e, which) {
+  e.preventDefault();
+  const rz = which === "list" ? $("rz-list") : $("rz-screen");
+  rz.classList.add("dragging");
+  document.body.classList.add("col-resizing");
+  const move = (ev) => {
+    const x = ev.clientX ?? ev.touches?.[0]?.clientX;
+    if (x == null) return;
+    if (which === "list") {
+      // 左列の幅。右側にも最低幅を残す
+      const w = Math.max(SPLIT_MIN_LEFT, Math.min(x, innerWidth - SPLIT_MIN_RIGHT));
+      document.documentElement.style.setProperty("--split-left", Math.round(w) + "px");
+    } else {
+      // 端末画面の割合。基準は右ペインの左端(= 左列の右端)
+      const base = $("list-view").getBoundingClientRect().right;
+      const avail = innerWidth - base;
+      if (avail <= 0) return;
+      const pct = Math.max(SPLIT_MIN_PCT, Math.min(SPLIT_MAX_PCT, ((x - base) / avail) * 100));
+      document.documentElement.style.setProperty("--split-screen", pct.toFixed(1) + "%");
+    }
+    placeResizers();
+  };
+  const up = () => {
+    removeEventListener("mousemove", move); removeEventListener("mouseup", up);
+    removeEventListener("touchmove", move); removeEventListener("touchend", up);
+    rz.classList.remove("dragging");
+    document.body.classList.remove("col-resizing");
+    // 次回も同じ配分で開けるように覚える
+    const cs = getComputedStyle(document.documentElement);
+    localStorage.setItem("agd-split-left", parseInt(cs.getPropertyValue("--split-left")) || "");
+    localStorage.setItem("agd-split-screen", parseFloat(cs.getPropertyValue("--split-screen")) || "");
+    placeResizers();
+  };
+  addEventListener("mousemove", move); addEventListener("mouseup", up);
+  addEventListener("touchmove", move, { passive: false }); addEventListener("touchend", up);
+}
+$("rz-list").addEventListener("mousedown", e => startColDrag(e, "list"));
+$("rz-screen").addEventListener("mousedown", e => startColDrag(e, "screen"));
+$("rz-list").addEventListener("touchstart", e => startColDrag(e, "list"), { passive: false });
+$("rz-screen").addEventListener("touchstart", e => startColDrag(e, "screen"), { passive: false });
+// ダブルクリックで既定に戻す(掴み直すより早い)
+for (const [id, keys] of [["rz-list", ["agd-split-left"]], ["rz-screen", ["agd-split-screen"]]])
+  $(id).addEventListener("dblclick", () => {
+    keys.forEach(k => localStorage.removeItem(k));
+    document.documentElement.style.removeProperty(id === "rz-list" ? "--split-left" : "--split-screen");
+    placeResizers();
+  });
 
 function setSplitPane(p) {
   splitPane = p;

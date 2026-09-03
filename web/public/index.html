@@ -20,6 +20,8 @@
     --path: #8b949e; --ai-title: #79a8d8; --summary: #c2ccd6;
     /* 並列ビューの左ペイン(セッション一覧)の幅 */
     --split-left: 560px;
+    /* 右ペイン内で端末画面が占める割合(残りがログ) */
+    --split-screen: 62%;
   }
   /* スマホでPC版を開いたときの誘導バナー(JSが幅を見て出す) */
   #mobile-banner { display: none; flex: none; align-items: center; gap: 10px; padding: 9px 12px;
@@ -96,7 +98,16 @@
   body.split-detail #detail-head .close { display: none; }
   /* 並列では横幅が限られる。端末画面は桁が崩れると読めないので広めに取り、
      ログ側を狭める(ログは折り返しても読める) */
-  body.split-detail #detail-screen { width: 62%; }
+  body.split-detail #detail-screen { width: var(--split-screen, 62%); }
+  /* 列の境目。掴んで幅を変えられる。細いと掴みにくいので当たり判定を広めに取り、
+     見た目の線は既存の border に任せる */
+  .col-resizer { position: fixed; top: var(--split-top, 76px); bottom: 0; width: 10px;
+                 margin-left: -5px; cursor: col-resize; z-index: 6; display: none; }
+  body.split-detail .col-resizer { display: block; }
+  .col-resizer:hover, .col-resizer.dragging { background: rgba(88,166,255,.25); }
+  /* ドラッグ中は本文の選択やホバーを止める(掴んだまま文字が反転するのを防ぐ) */
+  body.col-resizing { cursor: col-resize; user-select: none; }
+  body.col-resizing #detail-screen, body.col-resizing #detail-log { pointer-events: none; }
   /* どちらのペインを操作しているかを枠線で示す */
   body.split-detail:not(.pane-detail) #list-view { box-shadow: inset 2px 0 0 var(--accent); }
   body.split-detail.pane-detail #detail { box-shadow: inset 2px 0 0 var(--accent); }
@@ -400,6 +411,8 @@
   <label><input type="checkbox" id="mac-notify-toggle"> <span data-i18n="toggle.macnotify">macOS</span></label>
 </header>
 
+<div class="col-resizer" id="rz-list" title="drag to resize"></div>
+<div class="col-resizer" id="rz-screen" title="drag to resize"></div>
 <div id="split-empty" data-i18n="split.pick">Select a session on the left</div>
 <div id="views">
 <div id="grid-view">
@@ -532,6 +545,7 @@
         <tr><td><kbd>i</kbd> / <kbd>o</kbd></td><td data-i18n="help.split.io">Focus the send box / move the cursor into the log</td></tr>
         <tr><td><kbd>Esc</kbd></td><td data-i18n="help.split.esc">Leave the send box and return to the list</td></tr>
         <tr><td><kbd>p</kbd> / <kbd>n</kbd></td><td data-i18n="help.split.pn">Pin the selected session / start a new session (works in either pane)</td></tr>
+        <tr><td data-i18n-html="help.split.dragKey">drag the divider</td><td data-i18n="help.split.drag">Resize the columns (double-click a divider to reset)</td></tr>
         <tr><th colspan="2" data-i18n="help.h.detail">Detail view (o)</th></tr>
         <tr><td><kbd>j</kbd><kbd>k</kbd> / <kbd>d</kbd><kbd>u</kbd> / <kbd>g</kbd><kbd>G</kbd></td><td data-i18n="help.det.jk">Select a log entry (one / ±5 / first &amp; last)</td></tr>
         <tr><td><kbd>Enter</kbd> / <kbd>l</kbd> / <kbd>h</kbd></td><td data-i18n="help.det.fold">Toggle / open / close the selected entry</td></tr>
