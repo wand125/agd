@@ -329,7 +329,10 @@ async function codexRunning(): Promise<Session[]> {
     // exec(非対話)のほか、ChatGPT アプリが常駐させる app-server / mcp-server /
     // code-mode-host なども入ってくるため、ここでまとめて弾く
     if (m[2] === "??") continue;
-    if (/^\S*codex\s+(exec|e|app-server|mcp-server|exec-server|remote-control|completion|doctor)\b/.test(cmd)) continue;
+    // sandbox は実行中の codex が子として起こすヘルパー(ChatGPT.app 同梱)。
+    // 対話セッションと同じ tty に出るため、除外しないと1つのセッションが
+    // 2件に見え、f のジャンプ先が別のカードと入れ替わる(実際に踏んだ)
+    if (/^\S*codex\s+(exec|e|app-server|mcp-server|exec-server|remote-control|completion|doctor|sandbox|login|logout)\b/.test(cmd)) continue;
     // `codex resume <sid>` / `codex fork <sid>` は sid がコマンドラインに出る。
     // cwd からの逆引きより確実なのでこちらを優先する。
     const sid = cmd.match(/\b(?:resume|fork)\s+([0-9a-fA-F-]{36})\b/)?.[1] ?? "";
@@ -358,6 +361,9 @@ async function codexRunning(): Promise<Session[]> {
   const now = Date.now() / 1000;
   const out: Session[] = [];
   const seenSid = new Set<string>();
+  // 1つの tty に2つのセッションが載ることはない。除外し切れないヘルパーが
+  // 現れても、f のジャンプ先が入れ替わらないようにここで塞ぐ
+  const seenTty = new Set<string>();
   // node ラッパーと実体バイナリが両方 ps に出るため、tty を持つ方を優先して
   // 同一セッションを二重に数えない。
   for (const p of [...procs].sort((a, b) => (b.tty ? 1 : 0) - (a.tty ? 1 : 0))) {
@@ -367,7 +373,9 @@ async function codexRunning(): Promise<Session[]> {
     const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, seenSid);
     const sid = meta?.id ?? p.sid;
     if (sid && seenSid.has(sid)) continue;
+    if (p.tty && seenTty.has(p.tty)) continue;
     if (sid) seenSid.add(sid);
+    if (p.tty) seenTty.add(p.tty);
     const ageS = meta ? Math.max(0, Math.floor(now - meta.mtime)) : 0;
     out.push({
       key: `codex:${sid || `pid${p.pid}`}`,
