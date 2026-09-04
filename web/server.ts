@@ -82,9 +82,17 @@ async function osascript(script: string, args: string[] = [], timeoutMs = OSASCR
 }
 
 // ---------------------------------------------------------------- rollout メタキャッシュ
-type RolloutMeta = { path: string; id: string; cwd: string; mtime: number };
+type RolloutMeta = { path: string; id: string; cwd: string; mtime: number; started: number };
 const rolloutCache = new Map<string, RolloutMeta>(); // path → meta
 let lastRolloutScan = 0;
+
+// ファイル名から作成時刻(秒)を取る。取れなければ 0
+function rolloutStartedAt(path: string): number {
+  const m = path.match(/rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+  if (!m) return 0;
+  const [, y, mo, d, h, mi, sec] = m;
+  return new Date(+y, +mo - 1, +d, +h, +mi, +sec).getTime() / 1000;
+}
 
 function listRolloutFiles(): string[] {
   const out: string[] = [];
@@ -121,6 +129,10 @@ async function updateRolloutCache() {
         id: meta?.payload?.id ?? "",
         cwd: meta?.payload?.cwd ?? "",
         mtime: st.mtimeMs / 1000,
+        // ファイル名の rollout-YYYY-MM-DDTHH-MM-SS が作成時刻。
+        // mtime は最終更新なので、古いセッションを触ると「新しい」ように見える。
+        // プロセスの起動時刻と突き合わせるにはこちらが要る
+        started: rolloutStartedAt(p),
       });
     } catch { /* 不完全な行は無視 */ }
   }
@@ -138,10 +150,21 @@ function rolloutByCwd(cwd: string): RolloutMeta | undefined {
 // (最新の)rollout を返す。sid が衝突して 2 つ目が seenSid で捨てられ、
 // 一覧から丸ごと消えていた(実際に ttys071 のセッションが出ていなかった)。
 // 使用済みを避けながら新しい順に割り当てる
-function rolloutByCwdExcluding(cwd: string, used: Set<string>): RolloutMeta | undefined {
-  let best: RolloutMeta | undefined;
-  for (const m of rolloutCache.values())
-    if (m.cwd === cwd && !used.has(m.id) && (!best || m.mtime > best.mtime)) best = m;
+// プロセスの起動時刻に最も近い作成時刻の rollout を選ぶ。
+//
+// mtime(最終更新)で選ぶと、古いセッションを最近触っただけで「新しい」と
+// みなされ、別プロセスの rollout を取ってしまう。実際に、9/3 起動の
+// プロセスが 9/4 作成の rollout を掴み、画面(tty 由来)とログ(sid 由来)が
+// 食い違っていた。作成時刻同士なら1対1で対応する
+function rolloutByCwdExcluding(cwd: string, used: Set<string>, startedAt = 0): RolloutMeta | undefined {
+  let best: RolloutMeta | undefined, bestScore = Infinity;
+  for (const m of rolloutCache.values()) {
+    if (m.cwd !== cwd) continue;
+    if (used.has(m.id)) continue;
+    // 起動時刻が分かるなら差が最小のものを、分からなければ最新のものを採る
+    const score = startedAt && m.started ? Math.abs(m.started - startedAt) : -m.mtime;
+    if (score < bestScore) { bestScore = score; best = m; }
+  }
   return best;
 }
 function rolloutById(id: string): RolloutMeta | undefined {
@@ -308,19 +331,28 @@ const codexCwdCache = new Map<number, string>();
 const PS_CACHE_MS = 5000;
 async function psSnapshot(): Promise<string> {
   if (Date.now() - psCache.at < PS_CACHE_MS) return psCache.out;
-  const out = await sh(["ps", "-axo", "pid=,tty=,command="]);
+  const out = await sh(["ps", "-axo", "pid=,etime=,tty=,command="]);
   // 取得に失敗したときは前回値を残す(空にすると全セッションが消える)
   if (out) psCache = { at: Date.now(), out };
   return psCache.out;
 }
 
+// ps の etime を秒に直す。"12-04:00:54" / "1:02:03" / "05:12" の形が来る
+function etimeSec(v: string): number {
+  const m = v.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
+  if (!m) return 0;
+  const [, d, h, mi, sec] = m;
+  return (Number(d ?? 0) * 86400) + (Number(h ?? 0) * 3600) + (Number(mi) * 60) + Number(sec);
+}
+
 async function codexRunning(): Promise<Session[]> {
   const psOut = await psSnapshot();
-  const procs: { pid: number; tty: string; sid: string }[] = [];
+  const procs: { pid: number; tty: string; sid: string; age: number }[] = [];
   for (const l of psOut.split("\n")) {
-    const m = l.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
+    // pid / etime(起動からの経過) / tty / コマンド
+    const m = l.trim().match(/^(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/);
     if (!m) continue;
-    const cmd = m[3];
+    const cmd = m[4];
     // codex は絶対パス(npm の vendor バイナリ)や `node .../bin/codex` の形でも起動する。
     // 実行ファイル名が codex であればよい。`codex exec`(非対話・agd の管理外)は除外する。
     const argv0 = cmd.split(/\s+/)[0];
@@ -328,15 +360,21 @@ async function codexRunning(): Promise<Session[]> {
     // 対話セッションは必ず端末に紐づく。tty を持たないものは agd の管理対象外。
     // exec(非対話)のほか、ChatGPT アプリが常駐させる app-server / mcp-server /
     // code-mode-host なども入ってくるため、ここでまとめて弾く
-    if (m[2] === "??") continue;
+    if (m[3] === "??") continue;
     // sandbox は実行中の codex が子として起こすヘルパー(ChatGPT.app 同梱)。
     // 対話セッションと同じ tty に出るため、除外しないと1つのセッションが
     // 2件に見え、f のジャンプ先が別のカードと入れ替わる(実際に踏んだ)
     if (/^\S*codex\s+(exec|e|app-server|mcp-server|exec-server|remote-control|completion|doctor|sandbox|login|logout)\b/.test(cmd)) continue;
-    // `codex resume <sid>` / `codex fork <sid>` は sid がコマンドラインに出る。
-    // cwd からの逆引きより確実なのでこちらを優先する。
-    const sid = cmd.match(/\b(?:resume|fork)\s+([0-9a-fA-F-]{36})\b/)?.[1] ?? "";
-    procs.push({ pid: Number(m[1]), tty: m[2] === "??" ? "" : m[2], sid });
+    // `codex resume <sid>` はその sid のセッションを続けるので、コマンドラインの
+    // 値をそのまま使える。
+    //
+    // 一方 `codex fork <sid>` の sid は「分岐元」であって、動いているのは別の
+    // 新しいセッション。これを信じると分岐元の rollout を掴み、画面(tty 由来)と
+    // ログ(sid 由来)が食い違ううえ、分岐元を持っていた別カードからも sid を
+    // 奪って玉突きでズレる(実際にそうなっていた)。fork は cwd と起動時刻から
+    // 逆引きする
+    const sid = cmd.match(/\bresume\s+([0-9a-fA-F-]{36})\b/)?.[1] ?? "";
+    procs.push({ pid: Number(m[1]), tty: m[3] === "??" ? "" : m[3], sid, age: etimeSec(m[2]) });
   }
   if (!procs.length) return [];
   // lsof は 0.2〜0.38 秒かかる(実測)。プロセスの cwd は起動後に変わらないので、
@@ -366,11 +404,20 @@ async function codexRunning(): Promise<Session[]> {
   const seenTty = new Set<string>();
   // node ラッパーと実体バイナリが両方 ps に出るため、tty を持つ方を優先して
   // 同一セッションを二重に数えない。
-  for (const p of [...procs].sort((a, b) => (b.tty ? 1 : 0) - (a.tty ? 1 : 0))) {
+  //
+  // さらに「新しいプロセス順」に並べる。同じ cwd で複数起動していると
+  // rollout は cwd から逆引きするしかなく、rolloutByCwdExcluding は新しい順に
+  // 配る。ps の並び順のまま処理すると、古いプロセスが新しい rollout を取って
+  // 画面(tty 由来)とログ(sid 由来)が食い違う(実際にズレていた)。
+  // 起動が新しいプロセスに新しい rollout を割り当てれば対応が揃う
+  for (const p of [...procs].sort((a, b) =>
+      ((b.tty ? 1 : 0) - (a.tty ? 1 : 0)) || (a.age - b.age))) {
     const cwd = cwdByPid.get(p.pid);
     if (!cwd) continue;
     // resume/fork はコマンドラインの sid を信頼する。それ以外は cwd から逆引き
-    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, seenSid);
+    // p.age は ps の etime(起動からの経過秒)。起動時刻に直して突き合わせる
+    const startedAt = p.age ? Date.now() / 1000 - p.age : 0;
+    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, seenSid, startedAt);
     const sid = meta?.id ?? p.sid;
     if (sid && seenSid.has(sid)) continue;
     if (p.tty && seenTty.has(p.tty)) continue;
