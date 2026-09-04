@@ -883,7 +883,13 @@ function updateDetailHint(s) {
 
 // ---------------- 選択プロンプト応答 ----------------
 function renderPromptBar(bar, s) {
-  if (s.status !== "waiting" || !canOperate(s)) { bar.style.display = "none"; return; }
+  // status=waiting でも画面に選択肢が出ているとは限らない。
+  // claude agents は「入力待ち」を独自に報告するため、キューに未処理の
+  // メッセージがあるだけでも waiting になる(実際にそうなったセッションがある)。
+  // 選択肢が取れていないのに ↑↓⏎Esc y n を並べると、待っていない画面に
+  // 応答ボタンが出ているように見えてしまう
+  const hasOpts = !!s.prompt?.options?.length;
+  if (s.status !== "waiting" || !canOperate(s) || !hasOpts) { bar.style.display = "none"; return; }
   bar.style.display = "flex";  // #d-prompt は CSS で display:none のため、インラインで明示的に上書きする
   const p = s.prompt;
   const opts = p?.options ?? [];

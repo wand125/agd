@@ -159,3 +159,25 @@ describe("view セッションの二重生成", () => {
     expect(cmd).toContain("-t viewer -s viewer-view");
   });
 });
+
+// status=waiting でも画面に選択肢が出ているとは限らない。claude agents は
+// 「入力待ち」を独自に報告するため、キューに未処理のメッセージがあるだけでも
+// waiting になる。選択肢が無いのに応答ボタンを並べると、待っていない画面に
+// プロンプトが出ているように見える。
+describe("プロンプトバーの表示条件", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "web", "public", "app.js"), "utf8");
+  const start = src.indexOf("function renderPromptBar(");
+  const body = src.slice(start, src.indexOf("\n}", start) + 2);
+
+  test("選択肢の有無を条件に含める", () => {
+    // status だけで判定していると、選択肢ゼロでも汎用ボタンが並ぶ
+    expect(body).toContain("s.prompt?.options?.length");
+    // 早期 return の条件に含まれていること(canOperate(s) を挟むので行で見る)
+    const guard = body.split("\n").find(l => l.includes('s.status !== "waiting"')) ?? "";
+    expect(guard).toContain("!hasOpts");
+  });
+
+  test("条件を満たさなければ隠す", () => {
+    expect(body).toContain('bar.style.display = "none"');
+  });
+});
