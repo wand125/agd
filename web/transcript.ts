@@ -43,6 +43,11 @@ export function parseCodexLines(lines: string[]): LogEntry[] {
   };
   for (const l of lines) {
     let o: any; try { o = JSON.parse(l); } catch { continue; }
+    // /clear と /compact は "compacted" 行を書き、それ以前の履歴は
+    // replacement_history に置き換えられる。つまりこの行より前は破棄された
+    // 内容なので、ログにも出さない。無視すると clear した直後でも
+    // 過去の会話が並んだままになる(実際にそうなっていた)
+    if (o.type === "compacted") { entries.length = 0; continue; }
     if (o.type !== "response_item") continue;
     const p = o.payload; if (!p) continue;
     const ts = o.timestamp;

@@ -117,3 +117,37 @@ describe("truncateEntry", () => {
     expect(r.truncated).toBeUndefined();
   });
 });
+
+// codex の /clear と /compact は "compacted" 行を書き、それ以前の履歴は
+// replacement_history に置き換えられる。無視すると clear した直後でも
+// 過去の会話が並んだままになり、画面(空)とログ(過去の会話)が食い違う。
+describe("codex の /clear (compacted)", () => {
+  const msg = (role: string, text: string) => JSON.stringify({
+    type: "response_item", timestamp: "2026-09-06T00:00:00Z",
+    payload: { type: "message", role, content: [{ text }] },
+  });
+  const compacted = JSON.stringify({
+    type: "compacted", timestamp: "2026-09-06T00:00:00Z",
+    payload: { message: "", replacement_history: [] },
+  });
+
+  test("compacted より前の履歴は出さない", () => {
+    const e = parseCodexLines([msg("user", "clear前A"), msg("assistant", "clear前B"), compacted, msg("user", "clear後")]);
+    expect(e.map(x => x.text)).toEqual(["clear後"]);
+  });
+
+  test("compacted が複数あれば最後のもの以降だけ残る", () => {
+    const e = parseCodexLines([msg("user", "1回目前"), compacted, msg("user", "2回目前"), compacted, msg("user", "最新")]);
+    expect(e.map(x => x.text)).toEqual(["最新"]);
+  });
+
+  test("compacted が無ければ全部残る", () => {
+    const e = parseCodexLines([msg("user", "A"), msg("assistant", "B")]);
+    expect(e.map(x => x.text)).toEqual(["A", "B"]);
+  });
+
+  // clear 直後でログが空になるのは正しい(画面も空)
+  test("compacted の後に何も無ければ空", () => {
+    expect(parseCodexLines([msg("user", "前"), compacted])).toEqual([]);
+  });
+});
