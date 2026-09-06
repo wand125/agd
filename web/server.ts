@@ -124,6 +124,11 @@ async function updateRolloutCache() {
       const head = await fh.slice(0, 1_000_000).text();
       const line = head.split("\n")[0];
       const meta = JSON.parse(line);
+      // guardian などのサブエージェントも rollout を残す
+      // (source: {subagent: …})。会話ではなく承認判定のログなので、
+      // カードに割り当ててはいけない。これを候補に含めていたため、
+      // 別セッションのカードがサブエージェントのログを表示していた
+      if (JSON.stringify(meta?.payload?.source ?? {}).includes("subagent")) continue;
       rolloutCache.set(p, {
         path: p,
         id: meta?.payload?.id ?? "",
@@ -417,7 +422,19 @@ async function codexRunning(): Promise<Session[]> {
   // 配る。ps の並び順のまま処理すると、古いプロセスが新しい rollout を取って
   // 画面(tty 由来)とログ(sid 由来)が食い違う(実際にズレていた)。
   // 起動が新しいプロセスに新しい rollout を割り当てれば対応が揃う
-  for (const p of [...procs].sort((a, b) =>
+  // 同じ tty に codex が複数出ることがある。/new で会話を切り替えると、元の
+  // プロセスが子として新しい実体を起こすため(親 75815 → 子 10570 を実測)。
+  // これは1つのセッションなので、tty ごとに「最も新しいもの」だけを残す。
+  // 残さないと、余分な方が別セッションの rollout を先に取ってしまい、
+  // 他の tty のカードが玉突きでズレる
+  const byTty = new Map<string, typeof procs[number]>();
+  for (const p of procs) {
+    if (!p.tty) continue;
+    const cur = byTty.get(p.tty);
+    if (!cur || p.age < cur.age) byTty.set(p.tty, p);   // age が小さい = 新しい
+  }
+  const uniq = [...procs.filter(p => !p.tty), ...byTty.values()];
+  for (const p of uniq.sort((a, b) =>
       ((b.tty ? 1 : 0) - (a.tty ? 1 : 0)) || (a.age - b.age))) {
     const cwd = cwdByPid.get(p.pid);
     if (!cwd) continue;
