@@ -157,15 +157,22 @@ function rolloutByCwd(cwd: string): RolloutMeta | undefined {
 // プロセスが 9/4 作成の rollout を掴み、画面(tty 由来)とログ(sid 由来)が
 // 食い違っていた。作成時刻同士なら1対1で対応する
 function rolloutByCwdExcluding(cwd: string, used: Set<string>, startedAt = 0): RolloutMeta | undefined {
-  let best: RolloutMeta | undefined, bestScore = Infinity;
-  for (const m of rolloutCache.values()) {
-    if (m.cwd !== cwd) continue;
-    if (used.has(m.id)) continue;
-    // 起動時刻が分かるなら差が最小のものを、分からなければ最新のものを採る
-    const score = startedAt && m.started ? Math.abs(m.started - startedAt) : -m.mtime;
-    if (score < bestScore) { bestScore = score; best = m; }
-  }
-  return best;
+  const cands = [...rolloutCache.values()].filter(m => m.cwd === cwd && !used.has(m.id));
+  if (!cands.length) return undefined;
+  if (!startedAt) return cands.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+
+  // /new を使うと、同じプロセスのまま新しい rollout に切り替わる。
+  // 起動時刻だけで選ぶと最初の rollout に貼り付いたままになり、
+  // 画面(いまの会話)とログ(切替前の会話)が食い違う(実際にそうなっていた)。
+  //
+  // プロセス起動以降に作られた rollout のうち、最後に書かれたものが
+  // 「いま動いている会話」。多少の誤差を許すため 60 秒の猶予を持たせる。
+  const after = cands.filter(m => m.started && m.started >= startedAt - 60);
+  if (after.length) return after.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+
+  // 起動より後のものが無ければ、起動時刻に最も近いものを採る
+  return cands.reduce((a, b) =>
+    Math.abs((b.started || 0) - startedAt) < Math.abs((a.started || 0) - startedAt) ? b : a);
 }
 function rolloutById(id: string): RolloutMeta | undefined {
   for (const m of rolloutCache.values()) if (m.id === id) return m;
