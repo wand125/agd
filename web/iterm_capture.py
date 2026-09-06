@@ -176,13 +176,21 @@ async def stdin_loop(app):
 
 
 async def capture_loop(app):
+    # 一時的な失敗で "ok: False" を出すと、サーバー側はヘルパーが死んだと見なして
+    # AppleScript のフォールバックに切り替える。それは直列で1件3秒かかるため
+    # ポーリングが止まり、tty が stall 扱いになって画面が60秒固まる。
+    # 数回続けて失敗したときだけ落ちたと報告する。
+    fails = 0
     while True:
         try:
             await app.async_refresh()
             screens = await capture_all(app)
             print(json.dumps({"type": "screens", "screens": screens}), flush=True)
+            fails = 0
         except Exception as e:
-            print(json.dumps({"type": "status", "ok": False, "error": str(e)}), flush=True)
+            fails += 1
+            if fails >= 3:
+                print(json.dumps({"type": "status", "ok": False, "error": str(e)}), flush=True)
         await asyncio.sleep(POLL_SEC)
 
 

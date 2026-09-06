@@ -562,6 +562,8 @@ function helperOp(op: string, params: Record<string, unknown>): Promise<{ ok: bo
   });
 }
 
+// retryMs は失敗のたびに倍にする。接続できたら 5 秒に戻す(戻さないと
+// 一度こじれただけで以後ずっと 60 秒待ちになり、その間フォールバックが走る)
 function startItermHelper(retryMs = 5000) {
   const py = join(import.meta.dir, ".venv", "bin", "python");
   const script = join(import.meta.dir, "iterm_capture.py");
@@ -591,7 +593,7 @@ function startItermHelper(retryMs = 5000) {
               } else if (msg.type === "status") {
                 itermHelperOk = !!msg.ok;
                 if (!msg.ok) console.error("iterm2 helper:", msg.error);
-                else console.log("iterm2 helper: connected (color capture + ops)");
+                else { console.log("iterm2 helper: connected (color capture + ops)"); retryMs = 5000; }
               } else if (msg.type === "op") {
                 const cb = helperOps.get(msg.id);
                 if (cb) { helperOps.delete(msg.id); cb({ ok: !!msg.ok, error: msg.error }); }
@@ -782,13 +784,15 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
   // タイムアウトで stall 判定まで入って画面が60秒固まる(実測で1つの tty に
   // 97回 stall が出ていた)。Terminal.app を使うのはヘルパーが無いときだけでよい
   if (itermHelperOk) return result;
-  for (const tty of itermNeed) {
-    if (result.has(tty)) continue;
+  // ヘルパーが無いときだけ来る。件数が多いと直列では待ち時間が積み上がるので
+  // 並列で投げ、さらに1周期あたりの件数を絞る(取り切れなくても次の周期で拾う)
+  const todo = itermNeed.filter(t => !result.has(t)).slice(0, 8);
+  await Promise.all(todo.map(async tty => {
     const r = await osascriptResult(TERMINAL_CAPTURE_SCRIPT, [`/dev/${tty}`]);
-    if (r.timedOut) { markTtyStalled(tty); continue; }
+    if (r.timedOut) { markTtyStalled(tty); return; }
     if (r.out.startsWith(ITERM_SCREEN_PREFIX))
       result.set(tty, r.out.slice(ITERM_SCREEN_PREFIX.length).trimEnd());
-  }
+  }));
   return result;
 }
 
