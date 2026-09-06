@@ -97,8 +97,8 @@ describe("attach コマンドの組み立て", () => {
   });
 
   test("ホスト名はブラウザが今見ているものがそのまま入る", () => {
-    expect(attachCmd({ host: "hiroakimacbook-m4", tmuxTarget: "agd-x1:0.0" }))
-      .toContain("ssh hiroakimacbook-m4 ");
+    expect(attachCmd({ host: "mymac", tmuxTarget: "agd-x1:0.0" }))
+      .toContain("ssh mymac ");
   });
 });
 
@@ -114,17 +114,17 @@ describe("ssh 先ホストの決定", () => {
       { hostname }, { agdSshHost: served });
 
   test("ポートフォワード越し(localhost)ならサーバーが教えた名前を使う", () => {
-    // サーバーは user@host 形式で返す。手元(Neo=hiroaki)と母艦(HHosono)で
-    // ユーザー名が違い、名前だけだと Permission denied になる(実際に踏んだ)
+    // サーバーは user@host 形式で返す。手元と母艦でユーザー名が違うことが
+    // 多く、名前だけだと Permission denied になる(実際に踏んだ)
     for (const h of ["localhost", "127.0.0.1", "::1"])
-      expect(make(h, "HHosono@hiroakimacbook-m4")).toBe("HHosono@hiroakimacbook-m4");
+      expect(make(h, "alice@mymac")).toBe("alice@mymac");
   });
 
   test("直接ホスト名で開いているならそれを尊重する", () => {
     // tailscale serve や LAN 越しに素で開いている場合。サーバーの申告より
     // 実際に届いている名前の方が確実
-    expect(make("hiroakimacbook-m4", "somethingelse")).toBe("hiroakimacbook-m4");
-    expect(make("192.168.11.8", "somethingelse")).toBe("192.168.11.8");
+    expect(make("mymac", "somethingelse")).toBe("mymac");
+    expect(make("192.0.2.10", "somethingelse")).toBe("192.0.2.10");
   });
 
   test("サーバーが名前を返さないときは空を返す(ループバックを渡さない)", () => {
