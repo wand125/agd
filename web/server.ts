@@ -775,7 +775,13 @@ async function captureScreens(ttys: string[]): Promise<Map<string, string>> {
     }
   }
   // iTerm でも tmux でもない tty は Terminal.app を当たる。
-  // ここまでで取れているものは触らないので、iTerm 利用時のコストは増えない
+  //
+  // ただしヘルパーが生きている間は行わない。ヘルパーは2秒ごとに全 iTerm
+  // セッションを返すので、取りこぼしは一時的なもの。ここで直列に osascript を
+  // 投げると、1件あたり最大3秒 × 未取得の件数だけポーリングが止まり、
+  // タイムアウトで stall 判定まで入って画面が60秒固まる(実測で1つの tty に
+  // 97回 stall が出ていた)。Terminal.app を使うのはヘルパーが無いときだけでよい
+  if (itermHelperOk) return result;
   for (const tty of itermNeed) {
     if (result.has(tty)) continue;
     const r = await osascriptResult(TERMINAL_CAPTURE_SCRIPT, [`/dev/${tty}`]);
