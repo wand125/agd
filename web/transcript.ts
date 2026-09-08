@@ -11,11 +11,15 @@ export function forEachLineChunk(
   path: string,
   byteOffset: number,
   onLines: (lines: string[]) => void,
-  chunkBytes = 4 * 1024 * 1024,
+  chunkBytes = 1024 * 1024,
 ): number {
   const buf = Buffer.alloc(chunkBytes);
   const fd = openSync(path, "r");
-  let carry = Buffer.alloc(0);
+  // 書きかけ行の断片。1 行がチャンクを超えるときは断片を配列に溜め、改行が見つかった
+  // ときに 1 回だけ連結する。毎チャンク連結し直すと、20MB の行(実在する)で
+  // 増え続けるコピーが何十回も走り、mimalloc が返さない領域が積み上がる
+  let carry: Buffer[] = [];
+  let carryLen = 0;
   let readOffset = byteOffset;
   let completeOffset = byteOffset;
   try {
@@ -23,17 +27,22 @@ export function forEachLineChunk(
       const n = readSync(fd, buf, 0, buf.length, readOffset);
       if (n === 0) break;
       readOffset += n;
-      const bytes = carry.length ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
-      const lastNl = bytes.lastIndexOf(0x0a);
+      const chunk = buf.subarray(0, n);
+      const lastNl = chunk.lastIndexOf(0x0a);
       if (lastNl < 0) {
-        // 1 行がチャンクを超える場合だけ carry が伸びる。改行後には必ず捨てる。
-        carry = Buffer.concat([bytes]);
+        carry.push(Buffer.from(chunk));
+        carryLen += n;
         continue;
       }
-      const lines = bytes.subarray(0, lastNl).toString("utf8").split("\n").filter(Boolean);
+      const head = chunk.subarray(0, lastNl);
+      const bytes = carry.length ? Buffer.concat([...carry, head], carryLen + head.length) : head;
+      carry = [];
+      carryLen = 0;
+      const lines = bytes.toString("utf8").split("\n").filter(Boolean);
       if (lines.length) onLines(lines);
-      carry = Buffer.concat([bytes.subarray(lastNl + 1)]);
-      completeOffset = readOffset - carry.length;
+      const rest = chunk.subarray(lastNl + 1);
+      if (rest.length) { carry.push(Buffer.from(rest)); carryLen = rest.length; }
+      completeOffset = readOffset - carryLen;
     }
     return completeOffset;
   } finally {
@@ -53,8 +62,10 @@ export function readHead(path: string, maxBytes: number): string {
   }
 }
 
-export function parseClaudeLines(lines: string[]): LogEntry[] {
-  const entries: LogEntry[] = [];
+// entries を渡すとそこへ追記する(チャンク読みで配列をまたいで状態を持つため)。
+// codex の compacted は「それ以前を全部捨てる」なので、呼び出し側が溜めている
+// 配列そのものを空にしないと、前のチャンクや前回の追記分が残ってしまう
+export function parseClaudeLines(lines: string[], entries: LogEntry[] = []): LogEntry[] {
   for (const l of lines) {
     let o: any; try { o = JSON.parse(l); } catch { continue; }
     const ts = o.timestamp;
@@ -82,8 +93,7 @@ export function parseClaudeLines(lines: string[]): LogEntry[] {
   return entries;
 }
 
-export function parseCodexLines(lines: string[]): LogEntry[] {
-  const entries: LogEntry[] = [];
+export function parseCodexLines(lines: string[], entries: LogEntry[] = []): LogEntry[] {
   const textOf = (content: any): string => {
     if (typeof content === "string") return content;
     if (Array.isArray(content)) return content.map((x: any) => x.text ?? x.summary_text ?? "").filter(Boolean).join("\n");
@@ -132,8 +142,11 @@ export function readTranscript(path: string, agent: "claude" | "codex"): LogEntr
   if (!c || st.size < c.offset) c = { offset: 0, entries: [] };  // 縮んだら作り直し
   if (st.size > c.offset) {
     try {
+      // c.entries に直接追記する。spread で積むと compacted のリセットが効かず、
+      // 巨大な配列の spread はそれ自体がスタックを食う
+      const entries = c.entries;
       c.offset = forEachLineChunk(path, c.offset, lines => {
-        c.entries.push(...(agent === "claude" ? parseClaudeLines(lines) : parseCodexLines(lines)));
+        if (agent === "claude") parseClaudeLines(lines, entries); else parseCodexLines(lines, entries);
       });
     } catch {}
   }
