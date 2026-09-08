@@ -161,10 +161,14 @@ function rolloutByCwd(cwd: string): RolloutMeta | undefined {
 // みなされ、別プロセスの rollout を取ってしまう。実際に、9/3 起動の
 // プロセスが 9/4 作成の rollout を掴み、画面(tty 由来)とログ(sid 由来)が
 // 食い違っていた。作成時刻同士なら1対1で対応する
-function rolloutByCwdExcluding(cwd: string, used: Set<string>, startedAt = 0): RolloutMeta | undefined {
+// strict=true: 起動より後に作られた rollout しか採らない。起動直後で自分の rollout が
+// まだ無い(または未スキャンの)プロセスに、同じ cwd の既存セッションの sid を渡すと、
+// その sid を持つ既存カードに新プロセスの tty が載って画面が置き換わる(Ctrl+N の複製で
+// 実際に起きた)。該当なしなら undefined を返し、rollout が現れるまで pid キーで出す
+function rolloutByCwdExcluding(cwd: string, used: Set<string>, startedAt = 0, strict = false): RolloutMeta | undefined {
   const cands = [...rolloutCache.values()].filter(m => m.cwd === cwd && !used.has(m.id));
   if (!cands.length) return undefined;
-  if (!startedAt) return cands.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+  if (!startedAt) return strict ? undefined : cands.reduce((a, b) => (b.mtime > a.mtime ? b : a));
 
   // /new を使うと、同じプロセスのまま新しい rollout に切り替わる。
   // 起動時刻だけで選ぶと最初の rollout に貼り付いたままになり、
@@ -174,6 +178,7 @@ function rolloutByCwdExcluding(cwd: string, used: Set<string>, startedAt = 0): R
   // 「いま動いている会話」。多少の誤差を許すため 60 秒の猶予を持たせる。
   const after = cands.filter(m => m.started && m.started >= startedAt - 60);
   if (after.length) return after.reduce((a, b) => (b.mtime > a.mtime ? b : a));
+  if (strict) return undefined;
 
   // 起動より後のものが無ければ、起動時刻に最も近いものを採る
   return cands.reduce((a, b) =>
@@ -434,6 +439,10 @@ async function codexRunning(): Promise<Session[]> {
     if (!cur || p.age < cur.age) byTty.set(p.tty, p);   // age が小さい = 新しい
   }
   const uniq = [...procs.filter(p => !p.tty), ...byTty.values()];
+  // `codex resume <sid>` が持つ sid はそのプロセスのもの。cwd からの逆引きで他の
+  // プロセスに渡さないよう、先に全部押さえておく(新しいプロセスが先に処理されるため、
+  // 押さえないと resume 側が seenSid で弾かれてカードを乗っ取られる)
+  const claimed = new Set(uniq.map(p => p.sid).filter(Boolean));
   for (const p of uniq.sort((a, b) =>
       ((b.tty ? 1 : 0) - (a.tty ? 1 : 0)) || (a.age - b.age))) {
     const cwd = cwdByPid.get(p.pid);
@@ -441,7 +450,13 @@ async function codexRunning(): Promise<Session[]> {
     // resume/fork はコマンドラインの sid を信頼する。それ以外は cwd から逆引き
     // p.age は ps の etime(起動からの経過秒)。起動時刻に直して突き合わせる
     const startedAt = p.age ? Date.now() / 1000 - p.age : 0;
-    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, seenSid, startedAt);
+    const excl = new Set([...seenSid, ...claimed]);
+    if (p.sid) excl.delete(p.sid);
+    // 起動から間もないプロセスは自分の rollout がまだ無いことがある。その間に
+    // 既存セッションの rollout を掴ませない(strict)。rollout の作成は起動直後なので
+    // 数周期で追いつく
+    const young = !p.sid && p.age < 120;
+    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, excl, startedAt, young);
     const sid = meta?.id ?? p.sid;
     if (sid && seenSid.has(sid)) continue;
     if (p.tty && seenTty.has(p.tty)) continue;
