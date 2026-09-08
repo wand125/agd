@@ -5,6 +5,54 @@ import { statSync, openSync, readSync, closeSync } from "fs";
 
 export type LogEntry = { role: string; title?: string; text: string; ts?: string };
 
+// 巨大な jsonl をファイル全体ぶん確保せず、完結した行だけを逐次渡す。
+// LF は UTF-8 の継続バイトには現れないため、デコード前に探せば文字境界を壊さない。
+export function forEachLineChunk(
+  path: string,
+  byteOffset: number,
+  onLines: (lines: string[]) => void,
+  chunkBytes = 4 * 1024 * 1024,
+): number {
+  const buf = Buffer.alloc(chunkBytes);
+  const fd = openSync(path, "r");
+  let carry = Buffer.alloc(0);
+  let readOffset = byteOffset;
+  let completeOffset = byteOffset;
+  try {
+    for (;;) {
+      const n = readSync(fd, buf, 0, buf.length, readOffset);
+      if (n === 0) break;
+      readOffset += n;
+      const bytes = carry.length ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
+      const lastNl = bytes.lastIndexOf(0x0a);
+      if (lastNl < 0) {
+        // 1 行がチャンクを超える場合だけ carry が伸びる。改行後には必ず捨てる。
+        carry = Buffer.concat([bytes]);
+        continue;
+      }
+      const lines = bytes.subarray(0, lastNl).toString("utf8").split("\n").filter(Boolean);
+      if (lines.length) onLines(lines);
+      carry = Buffer.concat([bytes.subarray(lastNl + 1)]);
+      completeOffset = readOffset - carry.length;
+    }
+    return completeOffset;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// メタ情報の抽出では先頭だけで足りるため、巨大ファイル全体を一時確保しない。
+export function readHead(path: string, maxBytes: number): string {
+  const buf = Buffer.alloc(maxBytes);
+  const fd = openSync(path, "r");
+  try {
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return buf.toString("utf8", 0, n);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function parseClaudeLines(lines: string[]): LogEntry[] {
   const entries: LogEntry[] = [];
   for (const l of lines) {
@@ -84,20 +132,9 @@ export function readTranscript(path: string, agent: "claude" | "codex"): LogEntr
   if (!c || st.size < c.offset) c = { offset: 0, entries: [] };  // 縮んだら作り直し
   if (st.size > c.offset) {
     try {
-      const fd = openSync(path, "r");
-      const len = st.size - c.offset;
-      const buf = Buffer.alloc(len);
-      readSync(fd, buf, 0, len, c.offset);
-      closeSync(fd);
-      const chunk = buf.toString("utf8");
-      const lastNl = chunk.lastIndexOf("\n");
-      if (lastNl >= 0) {
-        // 完結した行だけパースし、書きかけの末尾行は次回に回す(オフセットは常に行境界)
-        const complete = chunk.slice(0, lastNl);
-        c.offset += Buffer.byteLength(complete, "utf8") + 1;
-        const lines = complete.split("\n").filter(Boolean);
+      c.offset = forEachLineChunk(path, c.offset, lines => {
         c.entries.push(...(agent === "claude" ? parseClaudeLines(lines) : parseCodexLines(lines)));
-      }
+      });
     } catch {}
   }
   transcriptCache.delete(path);           // LRU: 触ったものを末尾へ

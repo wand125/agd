@@ -3,7 +3,7 @@
 // ブラウザに提供する。起動: bun run server.ts (デフォルト http://localhost:8787)
 import { readdirSync, statSync, existsSync, readFileSync, openSync, readSync, closeSync, mkdirSync } from "fs";
 import { join } from "path";
-import { readTranscript, truncateEntry, type LogEntry } from "./transcript";
+import { forEachLineChunk, readHead, readTranscript, truncateEntry, type LogEntry } from "./transcript";
 import {
   detectPrompt, detectAskPrompt, parseTmuxPanes, TMUX_PANE_FORMAT,
   type PromptInfo, type TmuxPane,
@@ -500,7 +500,7 @@ function claudeRecent(excludeSids: Set<string>): Session[] {
     // cwd と要約を先頭部分から抽出
     let cwd = "", name = c.sid;
     try {
-      const head = readFileSync(c.path, { encoding: "utf8", flag: "r" }).slice(0, 200_000);
+      const head = readHead(c.path, 200_000);
       const m = head.match(/"cwd":"([^"]+)"/);
       if (m) cwd = m[1];
       const s = head.match(/"type":"summary".*?"summary":"([^"]+)"/);
@@ -1223,15 +1223,17 @@ function fileAllowedBy(transcript: string, want: string): boolean {
   if (c && c.mtime === st.mtimeMs) return c.ok.has(want);
   const ok = new Set<string>();
   try {
-    for (const line of readFileSync(transcript, "utf8").split("\n")) {
-      if (!line.includes("SendUserFile")) continue;
-      let o: any; try { o = JSON.parse(line); } catch { continue; }
-      for (const b of (o?.message?.content ?? [])) {
-        if (!b || b.name !== "SendUserFile") continue;
-        const fs = b.input?.files;
-        if (Array.isArray(fs)) for (const f of fs) if (typeof f === "string") ok.add(f);
+    forEachLineChunk(transcript, 0, lines => {
+      for (const line of lines) {
+        if (!line.includes("SendUserFile")) continue;
+        let o: any; try { o = JSON.parse(line); } catch { continue; }
+        for (const b of (o?.message?.content ?? [])) {
+          if (!b || b.name !== "SendUserFile") continue;
+          const fs = b.input?.files;
+          if (Array.isArray(fs)) for (const f of fs) if (typeof f === "string") ok.add(f);
+        }
       }
-    }
+    });
   } catch {}
   fileAllowCache.set(transcript, { mtime: st.mtimeMs, ok });
   return ok.has(want);
@@ -1318,7 +1320,7 @@ function aiTitleForSid(sid: string): string {
 
 function claudeNameFor(sid: string, path: string): string {
   try {
-    const head = readFileSync(path, "utf8").slice(0, 200_000);
+    const head = readHead(path, 200_000);
     const s = head.match(/"type":"summary".*?"summary":"([^"]+)"/);
     if (s) return s[1].slice(0, 60);
   } catch {}
@@ -1368,7 +1370,7 @@ async function searchLogs(q: string): Promise<SearchHit[]> {
     let cwd = f.cwd, name = "";
     if (f.agent === "claude") {
       try {
-        const head = readFileSync(f.path, "utf8").slice(0, 200_000);
+        const head = readHead(f.path, 200_000);
         cwd = head.match(/"cwd":"([^"]+)"/)?.[1] ?? "";
       } catch {}
       name = claudeNameFor(f.sid, f.path);
@@ -1490,7 +1492,7 @@ function enrichHits(raw: { path: string; agent: string; sid: string; mtime: numb
   return raw.map(h => {
     let cwd = "", name = "";
     if (h.agent === "claude") {
-      try { cwd = readFileSync(h.path, "utf8").slice(0, 200_000).match(/"cwd":"([^"]+)"/)?.[1] ?? ""; } catch {}
+      try { cwd = readHead(h.path, 200_000).match(/"cwd":"([^"]+)"/)?.[1] ?? ""; } catch {}
       name = claudeNameFor(h.sid, h.path);
     } else {
       cwd = rolloutById(h.sid)?.cwd ?? "";

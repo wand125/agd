@@ -9,8 +9,7 @@ import { Database } from "bun:sqlite";
 import { statSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { parseClaudeLines, parseCodexLines, readTranscript, type LogEntry } from "./transcript";
-import { openSync, readSync, closeSync } from "fs";
+import { forEachLineChunk, parseClaudeLines, parseCodexLines, readTranscript, type LogEntry } from "./transcript";
 
 declare const self: Worker;
 
@@ -68,31 +67,24 @@ function indexFile(t: IndexTarget) {
     return;
   }
   try {
-    const fd = openSync(t.path, "r");
-    const len = st.size - offset;
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, offset);
-    closeSync(fd);
-    const chunk = buf.toString("utf8");
-    const lastNl = chunk.lastIndexOf("\n");
-    if (lastNl < 0) return;
-    const complete = chunk.slice(0, lastNl);
-    offset += Buffer.byteLength(complete, "utf8") + 1;
-    const lines = complete.split("\n").filter(Boolean);
-    const parsed = t.agent === "claude" ? parseClaudeLines(lines) : parseCodexLines(lines);
-    const base = (db.query(`SELECT COALESCE(MAX(idx) + 1, 0) AS n FROM entries WHERE path = ?`).get(t.path) as any).n;
+    let nextIdx = (db.query(`SELECT COALESCE(MAX(idx) + 1, 0) AS n FROM entries WHERE path = ?`).get(t.path) as any).n;
     const insE = db.prepare(`INSERT INTO entries(path, idx, role, ts, text) VALUES(?, ?, ?, ?, ?)`);
     const insF = db.prepare(`INSERT INTO entries_fts(rowid, text) VALUES(?, ?)`);
-    const tx = db.transaction(() => {
-      parsed.forEach((e, i) => {
-        const text = e.text.slice(0, INDEX_TEXT_CAP);
-        const r = insE.run(t.path, base + i, e.role, e.ts ?? "", text);
-        insF.run(Number(r.lastInsertRowid), text);
+    // parsed をファイル全体ぶん保持しないよう、チャンクごとにパースして確定する。
+    const nextOffset = forEachLineChunk(t.path, offset, lines => {
+      const parsed = t.agent === "claude" ? parseClaudeLines(lines) : parseCodexLines(lines);
+      const tx = db.transaction(() => {
+        for (const e of parsed) {
+          const text = e.text.slice(0, INDEX_TEXT_CAP);
+          const r = insE.run(t.path, nextIdx++, e.role, e.ts ?? "", text);
+          insF.run(Number(r.lastInsertRowid), text);
+        }
       });
-      db.run(`INSERT INTO files(path, offset, agent, sid) VALUES(?, ?, ?, ?)
-              ON CONFLICT(path) DO UPDATE SET offset = excluded.offset`, [t.path, offset, t.agent, t.sid]);
+      tx();
     });
-    tx();
+    // 全チャンク成功後だけ進捗を記録し、途中失敗時は次回に同じ位置からやり直す。
+    db.run(`INSERT INTO files(path, offset, agent, sid) VALUES(?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET offset = excluded.offset`, [t.path, nextOffset, t.agent, t.sid]);
   } catch {}
 }
 

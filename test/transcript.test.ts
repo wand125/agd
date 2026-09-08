@@ -1,7 +1,44 @@
 import { test, expect, describe } from "bun:test";
-import { parseClaudeLines, parseCodexLines, truncateEntry, TRUNCATE_AT } from "../web/transcript";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { forEachLineChunk, parseClaudeLines, parseCodexLines, readHead, truncateEntry, TRUNCATE_AT } from "../web/transcript";
 
 const jl = (...objs: unknown[]) => objs.map(o => JSON.stringify(o));
+
+describe("チャンク読み込み", () => {
+  test("長い行・UTF-8 境界・書きかけ末尾を扱い、行境界から再開できる", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agd-transcript-"));
+    const path = join(dir, "sample.jsonl");
+    try {
+      const complete = `${"x".repeat(25)}日本語\n次の行\n`;
+      writeFileSync(path, complete + "書きかけ");
+      const batches: string[][] = [];
+      const offset = forEachLineChunk(path, 0, lines => batches.push(lines), 16);
+      expect(batches.flat()).toEqual([`${"x".repeat(25)}日本語`, "次の行"]);
+      expect(offset).toBe(Buffer.byteLength(complete));
+
+      appendFileSync(path, "の続き\n最後\n");
+      const resumed: string[] = [];
+      const nextOffset = forEachLineChunk(path, offset, lines => resumed.push(...lines), 16);
+      expect(resumed).toEqual(["書きかけの続き", "最後"]);
+      expect(nextOffset).toBe(Buffer.byteLength(complete + "書きかけの続き\n最後\n"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("readHead は指定バイト数だけ読む", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agd-head-"));
+    const path = join(dir, "large.txt");
+    try {
+      writeFileSync(path, "abcdefghijklmnopqrstuvwxyz");
+      expect(readHead(path, 10)).toBe("abcdefghij");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("parseClaudeLines", () => {
   test("ユーザーとアシスタントの発言を拾う", () => {
