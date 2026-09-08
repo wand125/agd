@@ -100,7 +100,7 @@ Once installed, manage the server with `launchctl kickstart -k gui/$(id -u)/com.
 | `AGD_PORT` | dashboard port (default 8787) |
 | `AGD_PATH_STRIP` | path prefix to abbreviate as `…` in the UI (e.g. `~/projects`) |
 | `AGD_INDEX_DAYS` | full-text index window in days (default 14) |
-| `AGD_INDEX_MAX_MB` | rebuild the search DB if it exceeds this size (default 300) |
+| `AGD_INDEX_MAX_MB` | rebuild the search DB if it exceeds this size (default 1000) |
 
 macOS notifications and AI summaries are toggled from the dashboard header (stored in `~/.cache/agd/config.json`).
 

@@ -16,7 +16,10 @@ declare const self: Worker;
 const HOME = homedir();
 const DB_PATH = join(HOME, ".cache", "agd", "search.db");
 const INDEX_TEXT_CAP = 2000;
-const MAX_DB_MB = Number(process.env.AGD_INDEX_MAX_MB || 300);
+// 上限は「壊れた肥大」の安全弁。14 日分で 300MB 弱になる環境では 300 だと
+// 作り直し直後に再び上限に触れて、起動のたびに全再構築が走る。DB の大きさは
+// ディスクにしか効かない(ページキャッシュは数 MB)ので、上限は緩めでよい
+const MAX_DB_MB = Number(process.env.AGD_INDEX_MAX_MB || 1000);
 
 // ---- 置き場所の確保。~/.cache は外部ツールに丸ごと消されることがあるため毎回作る ----
 try { mkdirSync(join(HOME, ".cache", "agd"), { recursive: true }); } catch {}
@@ -33,6 +36,17 @@ try {
 const db = new Database(DB_PATH);
 db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
+// 期限切れファイルを削除しても、空きページが残るだけでファイルは縮まない。
+// 14 日窓では削除と追加が同じ量で釣り合うはずなのに、空きページの分だけ
+// 肥大して上限に達し、全再構築(2GB のログを読み直す)が周期的に走っていた。
+// incremental にしておき、削除のあとに空きページを返す
+try {
+  const mode = (db.query("PRAGMA auto_vacuum").get() as any)?.auto_vacuum;
+  if (mode !== 2) {
+    db.run("PRAGMA auto_vacuum = INCREMENTAL");
+    db.run("VACUUM");   // 既存 DB は VACUUM で初めて設定が効く。作り直し直後は一瞬
+  }
+} catch {}
 db.run(`CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, offset INTEGER, agent TEXT, sid TEXT)`);
 db.run(`CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT, idx INTEGER, role TEXT, ts TEXT, text TEXT)`);
 db.run(`CREATE INDEX IF NOT EXISTS entries_path ON entries(path)`);
@@ -95,11 +109,14 @@ async function reindex(targets: IndexTarget[]) {
   try {
     const keep = new Set(targets.map(t => t.path));
     const stale = db.query(`SELECT path FROM files`).all() as { path: string }[];
+    let dropped = 0;
     for (const r of stale) if (!keep.has(r.path)) {
       dropFileFromIndex(r.path);
       db.run(`DELETE FROM files WHERE path = ?`, [r.path]);
+      dropped++;
       await Bun.sleep(1);  // 検索リクエストの割り込みを許す
     }
+    if (dropped) { try { db.run("PRAGMA incremental_vacuum"); } catch {} }
     let done = 0;
     for (const t of targets) {
       indexFile(t);

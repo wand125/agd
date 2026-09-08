@@ -100,7 +100,7 @@ bash scripts/install-macapp.sh
 | `AGD_PORT` | ダッシュボードのポート(デフォルト 8787) |
 | `AGD_PATH_STRIP` | UI 上で「…」に短縮する共通パスプレフィックス(例: `~/projects`) |
 | `AGD_INDEX_DAYS` | 全文検索インデックスの対象期間・日数(デフォルト 14) |
-| `AGD_INDEX_MAX_MB` | 検索DBがこのサイズを超えたら作り直す(デフォルト 300) |
+| `AGD_INDEX_MAX_MB` | 検索DBがこのサイズを超えたら作り直す(デフォルト 1000) |
 
 macOS 通知と AI 要約はダッシュボードのヘッダーでオン/オフできます(`~/.cache/agd/config.json` に保存)。
 
