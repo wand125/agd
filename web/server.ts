@@ -452,11 +452,11 @@ async function codexRunning(): Promise<Session[]> {
     const startedAt = p.age ? Date.now() / 1000 - p.age : 0;
     const excl = new Set([...seenSid, ...claimed]);
     if (p.sid) excl.delete(p.sid);
-    // 起動から間もないプロセスは自分の rollout がまだ無いことがある。その間に
-    // 既存セッションの rollout を掴ませない(strict)。rollout の作成は起動直後なので
-    // 数周期で追いつく
-    const young = !p.sid && p.age < 120;
-    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, excl, startedAt, young);
+    // sid 無し(素の codex / fork)の rollout は必ず自分の起動より後に作られる。
+    // codex は最初の送信まで rollout を作らないことがある(実測: 起動後 12 秒経っても
+    // 無し)ため、年齢で猶予を切ると入力待ちのまま放置された新プロセスが既存
+    // セッションの rollout を掴む。sid 無しは常に strict にして、無ければ pid キー
+    const meta = (p.sid ? rolloutById(p.sid) : null) ?? rolloutByCwdExcluding(cwd, excl, startedAt, !p.sid);
     const sid = meta?.id ?? p.sid;
     if (sid && seenSid.has(sid)) continue;
     if (p.tty && seenTty.has(p.tty)) continue;
